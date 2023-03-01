@@ -326,8 +326,23 @@ Definition cpu_write' (lbl: SyLabel) := match lbl with
   | _ => False
 end.
 
+Definition cpu_read' (lbl: SyLabel) := match lbl with
+  | EventLab (ThreadEvent _ _ (Cpu_load _ _)) => True
+  | _ => False
+end.
+
 Definition fpga_write' (lbl: SyLabel) := match lbl with
   | EventLab (FpgaEvent (Fpga_write_resp _) _ _) => True
+  | _ => False
+end.
+
+Definition fpga_read_resp' (lbl: SyLabel) := match lbl with
+  | EventLab (FpgaEvent (Fpga_read_resp _ _ _) _ _) => True
+  | _ => False
+end.
+
+Definition fpga_mem_read' (lbl: SyLabel) := match lbl with
+  | FpgaMemRead _ => True
   | _ => False
 end.
 
@@ -350,7 +365,7 @@ Definition TSO_fair tr st :=
 
 End TSOFPGA.
 
-Ltac unfolder' := unfold set_compl, cross_rel, cpu_write', fpga_write', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_cpu_prop, def_lbl, in_thread, lbl_thread_opt, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
+Ltac unfolder' := unfold set_compl, cross_rel, cpu_write', cpu_read', fpga_write', fpga_read_resp', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_cpu_prop, def_lbl, in_thread, lbl_thread_opt, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
 
 Section TSOFPGA_Facts.
 
@@ -373,6 +388,17 @@ Proof.
   destruct e; vauto.
   destruct e; vauto.
   eauto.
+Qed.
+
+Lemma fpga_read_structure tlab (R: fpga_read_resp' tlab):
+  exists chan index meta loc val, tlab = EventLab (FpgaEvent (Fpga_read_resp chan loc val) index meta).
+Proof.
+  unfolder'.
+  destruct tlab eqn:WW; vauto.
+  destruct e; vauto.
+  destruct e; vauto.
+  exists c, index, m, x, v.
+  reflexivity.
 Qed.
 
 End TSOFPGA_Facts.

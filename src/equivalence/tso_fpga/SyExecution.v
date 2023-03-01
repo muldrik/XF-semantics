@@ -110,13 +110,13 @@ Record Wf_fpga := {
   wf_fenceallpair_complete: E ∩₁ FnReqAll ⊆₁ dom_rel fenceallpair ;
 }.
 
-(* Record Wf :=
+Record Wf :=
   { wf_index : forall a b,
     E a /\ E b /\ tid a = tid b /\ same_index a b /\ ~ is_init a -> a = b ;
     wf_rfE : rf ≡ ⦗E⦘ ⨾ rf ⨾ ⦗E⦘ ;
     wf_rfD : rf ≡ ⦗W⦘ ⨾ rf ⨾ ⦗R⦘ ;
     wf_rfl : rf ⊆ same_loc ;
-    wf_rfv : forall w r (RF: rf w r), valw w = valr r ;
+    (* wf_rfv : forall w r (RF: rf w r), valw w = valr r ; *)
     wf_rff : functional rf⁻¹ ;
     wf_coE : co ≡ ⦗E⦘ ⨾ co ⨾ ⦗E⦘ ;
     wf_coD : co ≡ ⦗W⦘ ⨾ co ⨾ ⦗W⦘ ;
@@ -127,7 +127,7 @@ Record Wf_fpga := {
     wf_initE : is_init ⊆₁ E ;
     wf_co_init : co ⨾ ⦗is_init⦘ ≡ ∅₂ ;
     wf_tid_init : forall e (ACT : acts G e), tid e = 0 <-> is_init e ;
-  }. *)
+  }.
 
 
 Definition fenceCpu := sb ⨾ ⦗CpuFence⦘ ⨾ sb.
@@ -177,14 +177,14 @@ Proof.
   destruct tr; simpl; vauto. red in LTS. desc. split; vauto.
 Qed. 
 
-(* Lemma is_cpu_or_fpga: forall e, E e -> Cpu e \/ Fpga e.
-Proof.
-    intros e H.
-    unfold Cpu, Fpga, Req, Rsp.
-    destruct e; unfold set_union; destruct e;
-    ins; intuition.
-Qed.  *)
-(*
+Definition coe := co \ sb.
+(* Definition fre := fr \ sb. *)
+Definition rfi := rf ∩ sb.
+Definition coi := co ∩ sb.
+Definition fri := fr ∩ sb.
+
+
+
 Lemma sb_trans : transitive sb.
 Proof using.
   unfold sb.
@@ -200,6 +200,8 @@ Lemma sb_same_loc_trans: transitive (sb ∩ same_loc).
 Proof using.
   apply restr_eq_trans, sb_trans.
 Qed.
+
+Definition hb := (sb ∪ rf)⁺.
 
 Lemma hb_trans : transitive hb.
 Proof using.
@@ -224,6 +226,8 @@ Proof using. basic_solver. Qed.
 (******************************************************************************)
 (** ** Same Location relations  *)
 (******************************************************************************)
+
+Implicit Type WF : Wf.
 
 Lemma loceq_rf WF : funeq loc rf.
 Proof using. apply WF. Qed.
@@ -1103,8 +1107,6 @@ Proof.
   2: { unfolder. red. ins. desc. subst. eapply co_irr; eauto. }
   exists x. split; auto. 
 Qed. 
-
-*)
 
 
 End SyExecution.

@@ -67,6 +67,36 @@ Definition loc (e: Event) := match e with
   | InitEvent _ => 0
   end.
 
+Definition valr (e: Event) := match e with
+  | ThreadEvent _ _ (Cpu_load _ v) => v
+  | ThreadEvent _ _ (Cpu_store _ _) => 0
+  | ThreadEvent _ _ Cpu_fence => 0
+  | FpgaEvent (Fpga_write_req _ _ v) _ _ => v
+  | FpgaEvent (Fpga_read_req _ _) _ _ => 0
+  | FpgaEvent (Fpga_write_resp _) _ _ => 0
+  | FpgaEvent (Fpga_read_resp _ _ v) _ _ => v
+  | FpgaEvent (Fpga_fence_req_one _) _ _ => 0
+  | FpgaEvent (Fpga_fence_req_all) _ _ => 0
+  | FpgaEvent (Fpga_fence_resp_one _) _ _ => 0
+  | FpgaEvent (Fpga_fence_resp_all) _ _ => 0
+  | InitEvent _ => 0
+  end.
+
+Definition valw (e: Event) := match e with
+  | ThreadEvent _ _ (Cpu_load _ _) => 0
+  | ThreadEvent _ _ (Cpu_store _ v) => v
+  | ThreadEvent _ _ Cpu_fence => 0
+  | FpgaEvent (Fpga_write_req _ _ _) _ _ => 0
+  | FpgaEvent (Fpga_read_req _ _) _ _ => 0
+  | FpgaEvent (Fpga_write_resp _) _ _ => 0
+  | FpgaEvent (Fpga_read_resp _ _ _) _ _ => 0
+  | FpgaEvent (Fpga_fence_req_one _) _ _ => 0
+  | FpgaEvent (Fpga_fence_req_all) _ _ => 0
+  | FpgaEvent (Fpga_fence_resp_one _) _ _ => 0
+  | FpgaEvent (Fpga_fence_resp_all) _ _ => 0
+  | InitEvent _ => 0
+  end.
+
 Definition index(e: Event) := match e with
   | ThreadEvent _ i _ => i
   | FpgaEvent _ i _ => i
