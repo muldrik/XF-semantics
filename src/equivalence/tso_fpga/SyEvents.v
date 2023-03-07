@@ -10,7 +10,7 @@ Inductive FPGAEvent :=
   | Fpga_read_req (c:Chan) (x:Loc)
   | Fpga_fence_req_one (c: Chan)
   | Fpga_fence_req_all
-  | Fpga_write_resp (c:Chan)
+  | Fpga_write_resp (c:Chan) (x:Loc) (v:Val)
   | Fpga_read_resp (c:Chan) (x:Loc) (v:Val)
   | Fpga_fence_resp_one (c: Chan)
   | Fpga_fence_resp_all.
@@ -22,7 +22,7 @@ Inductive CPUEvent :=
   | Cpu_fence.
 
 Inductive Event :=
-  | ThreadEvent (thread: Tid) (index: nat) (e: CPUEvent)
+  | ThreadEvent (thread: nat) (index: nat) (e: CPUEvent)
   | FpgaEvent (e: FPGAEvent) (index: nat) (m: Mdata)
   | InitEvent (x : SyLabels.Loc).
 
@@ -32,7 +32,7 @@ Definition fpga_chan (e: FPGAEvent) : Chan :=
   | Fpga_read_req c _ => c
   | Fpga_fence_req_one c => c
   | Fpga_fence_req_all => 0
-  | Fpga_write_resp c => c
+  | Fpga_write_resp c _ _ => c
   | Fpga_read_resp c _ _ => c
   | Fpga_fence_resp_one c => c
   | Fpga_fence_resp_all => 0
@@ -47,9 +47,9 @@ end.
 
 Definition tid (e: Event) : Tid :=
   match e with
-  | ThreadEvent t _ _ => t
-  | FpgaEvent _ _ _ => 1
-  | InitEvent _ => 0
+  | ThreadEvent t _ _ => CpuTid t
+  | FpgaEvent _ _ _ => FpgaTid
+  | InitEvent _ => InitTid
   end. 
 
 Definition loc (e: Event) := match e with
@@ -58,22 +58,22 @@ Definition loc (e: Event) := match e with
   | ThreadEvent _ _ Cpu_fence => 0
   | FpgaEvent (Fpga_write_req _ x _) _ _ => x
   | FpgaEvent (Fpga_read_req _ x) _ _ => x
-  | FpgaEvent (Fpga_write_resp _) _ _ => 0
+  | FpgaEvent (Fpga_write_resp _ x _) _ _ => x
   | FpgaEvent (Fpga_read_resp _ x _) _ _ => x
   | FpgaEvent (Fpga_fence_req_one _) _ _ => 0
   | FpgaEvent (Fpga_fence_req_all) _ _ => 0
   | FpgaEvent (Fpga_fence_resp_one _) _ _ => 0
   | FpgaEvent (Fpga_fence_resp_all) _ _ => 0
-  | InitEvent _ => 0
+  | InitEvent l => l
   end.
 
 Definition valr (e: Event) := match e with
   | ThreadEvent _ _ (Cpu_load _ v) => v
   | ThreadEvent _ _ (Cpu_store _ _) => 0
   | ThreadEvent _ _ Cpu_fence => 0
-  | FpgaEvent (Fpga_write_req _ _ v) _ _ => v
+  | FpgaEvent (Fpga_write_req _ _ v) _ _ => 0
   | FpgaEvent (Fpga_read_req _ _) _ _ => 0
-  | FpgaEvent (Fpga_write_resp _) _ _ => 0
+  | FpgaEvent (Fpga_write_resp _ _ _) _ _ => 0
   | FpgaEvent (Fpga_read_resp _ _ v) _ _ => v
   | FpgaEvent (Fpga_fence_req_one _) _ _ => 0
   | FpgaEvent (Fpga_fence_req_all) _ _ => 0
@@ -88,7 +88,7 @@ Definition valw (e: Event) := match e with
   | ThreadEvent _ _ Cpu_fence => 0
   | FpgaEvent (Fpga_write_req _ _ _) _ _ => 0
   | FpgaEvent (Fpga_read_req _ _) _ _ => 0
-  | FpgaEvent (Fpga_write_resp _) _ _ => 0
+  | FpgaEvent (Fpga_write_resp _ _ v) _ _ => v
   | FpgaEvent (Fpga_read_resp _ _ _) _ _ => 0
   | FpgaEvent (Fpga_fence_req_one _) _ _ => 0
   | FpgaEvent (Fpga_fence_req_all) _ _ => 0
@@ -118,7 +118,7 @@ end.
 
 Definition is_wr_resp (e: Event) :=
   match e with
-  | FpgaEvent (Fpga_write_resp _) _ _ => True
+  | FpgaEvent (Fpga_write_resp _ _ _) _ _ => True
   | _ => False
 end.
 
@@ -197,7 +197,7 @@ end.
 Definition is_w e : Prop :=
   match e with
   | ThreadEvent _ _ (Cpu_store _ _) => True
-  | FpgaEvent (Fpga_write_resp _) _ _ => True
+  | FpgaEvent (Fpga_write_resp _ _ _) _ _ => True
   | InitEvent _ => True
   | _ => False
 end.
@@ -218,9 +218,20 @@ Definition is_req (e1 : Event) :=
   | _ => False
 end.
 
+Definition is_resp (e1 : Event) :=
+  match e1 with
+  | FpgaEvent (Fpga_write_resp _ _ _) _ _ => True
+  | FpgaEvent (Fpga_read_resp _ _ _) _ _ => True
+  | FpgaEvent (Fpga_fence_resp_one _) _ _ => True
+  | FpgaEvent (Fpga_fence_resp_all) _ _ => True
+  | _ => False
+end.
+
+
+
 Definition req_resp_pair (e1 e2: Event) :=
   match e1, e2 with
-  | FpgaEvent (Fpga_write_req chan1 _ _) _ meta1, FpgaEvent (Fpga_write_resp chan2) _ meta2 => chan1 = chan2 /\ meta1 = meta2
+  | FpgaEvent (Fpga_write_req chan1 _ _) _ meta1, FpgaEvent (Fpga_write_resp _ _ chan2) _ meta2 => chan1 = chan2 /\ meta1 = meta2
   | FpgaEvent (Fpga_read_req chan1 _) _ meta1, FpgaEvent (Fpga_read_resp chan2 _ _) _ meta2 => chan1 = chan2 /\ meta1 = meta2
   | FpgaEvent (Fpga_fence_req_one chan1) _ meta1, FpgaEvent (Fpga_fence_resp_one chan2) _ meta2 => chan1 = chan2 /\ meta1 = meta2
   | FpgaEvent (Fpga_fence_req_all) _ meta1, FpgaEvent (Fpga_fence_resp_all) _ meta2 => meta1 = meta2
@@ -273,7 +284,7 @@ Qed.
 
 Definition is_tid i a : Prop := tid a = i.
 
-Definition same_tid := (fun x y => tid x = tid y).
+Definition same_tid := (fun a b => tid a = tid b).
 
 Definition ext_sb a b := 
   match a, b with
@@ -412,8 +423,7 @@ Proof using.
 generalize ext_sb_tid_init; firstorder.
 Qed.
 
-
-(* Lemma tid_ext_sb: same_tid ⊆ same_tid ∩ same_index ∪ ext_sb ∪ ext_sb⁻¹ ∪ (is_init × is_init).
+Lemma tid_ext_sb: same_tid ⊆ same_tid ∩ same_index ∪ ext_sb ∪ ext_sb⁻¹ ∪ (is_init × is_init).
 Proof using.
   unfold ext_sb, same_tid, same_index, tid, is_init, cross_rel; unfolder.
   ins; destruct x, y; desf; eauto.
@@ -429,7 +439,12 @@ Proof using.
   rewrite tid_ext_sb at 1.
   unfold cross_rel.
   basic_solver 12.
-Qed. *)
+Qed.
+
+Lemma ext_sb_index x y (SB: ext_sb x y) (N: ~ is_init x): index x < index y.
+Proof.
+  unfold ext_sb in *; desf; ins; desf; eauto.
+Qed.
 
 (******************************************************************************)
 (** ** Tactics *)

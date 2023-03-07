@@ -34,7 +34,7 @@ Inductive UpstreamEntry :=
 
 Inductive SyLabel := 
   | EventLab (e: Event)
-  | CpuFlush (thread: Tid)
+  | CpuFlush (thread: nat)
   | FpgaMemRead (c: Chan)
   | FpgaMemFlush (c: Chan)
   | FpgaReadToUpstream (c: Chan).
@@ -57,7 +57,7 @@ Record SyState := mkState {
   up_bufs: UpsBufs;
   down_bufs: DownsBufs;
   sh_mem: shared_memory;
-  cpu_bufs: Tid -> buffer
+  cpu_bufs: nat -> buffer
 }.
 
 
@@ -96,7 +96,7 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
       (NO_FENCE_ONE: forall meta', ~ In ((fence_ch_wp channel), meta') tail)
       (NO_FENCE_ALL: forall meta', ~ In ((fence_all_wp), meta') tail):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
-                 (EventLab (FpgaEvent (Fpga_write_resp channel) index meta))
+                 (EventLab (FpgaEvent (Fpga_write_resp channel loc val) index meta))
                  (mkState (head ++ tail) r_pool (upd up_bufs channel (up_bufs channel ++ cons (store_up loc val, meta) nil)) down_bufs sh_mem cpu_bufs)
 | fpga_mem_write w_pool r_pool up_bufs up_buf' down_bufs sh_mem cpu_bufs loc val channel meta
       (UPSTREAM: up_bufs channel = cons ((store_up loc val), meta) up_buf'):
@@ -138,7 +138,7 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
 | cpu_propagate w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs cpu_buf' loc val thread
       (CPU_BUF: cpu_bufs thread = cons (loc, val) cpu_buf'):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
-                 (CpuFlush thread)
+                 (CpuFlush (thread))
                  (mkState w_pool r_pool up_bufs down_bufs (upd sh_mem loc val) (upd cpu_bufs thread cpu_buf'))
 | cpu_read_buf w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs loc val thread index
       (CPU_BUF: latest_buffered (cpu_bufs thread) loc (Some val)):
@@ -269,21 +269,26 @@ Definition proj_ev (lbl: SyLabel) :=
 
 (* End Experimental *)
 
-Definition lbl_thread_opt (lbl: SyLabel) :=
+(* Definition lbl_cpu_thread_opt (lbl: SyLabel) :=
   match lbl with
   | EventLab (ThreadEvent thread _ _) => Some thread
-  | EventLab (FpgaEvent _ _ _) => Some 1
-  | FpgaMemFlush _ => Some 1
-  | FpgaMemRead _ => Some 1
-  | FpgaReadToUpstream _ => Some 1
   | CpuFlush thread => Some thread
   | _ => None
+  end. *)
+
+Definition lbl_thread (lbl: SyLabel) :=
+  match lbl with
+  | EventLab e => tid e
+  | FpgaMemFlush c => FpgaTid
+  | FpgaMemRead c => FpgaTid
+  | FpgaReadToUpstream c => FpgaTid
+  | CpuFlush thread => CpuTid thread
   end.
 
 Definition lbl_chan_opt (lbl: SyLabel) :=
   match lbl with
   | EventLab (FpgaEvent (Fpga_write_req c _ _) _ _) => Some c
-  | EventLab (FpgaEvent (Fpga_write_resp c) _ _) => Some c
+  | EventLab (FpgaEvent (Fpga_write_resp c _ _) _ _) => Some c
   | EventLab (FpgaEvent (Fpga_read_req c _) _ _) => Some c
   | EventLab (FpgaEvent (Fpga_read_resp c _ _) _ _) => Some c
   | EventLab (FpgaEvent (Fpga_fence_req_one c) _ _) => Some c
@@ -296,7 +301,7 @@ Definition lbl_chan_opt (lbl: SyLabel) :=
   | _ => None
   end.
 
-Definition in_thread thread := fun lbl => lbl_thread_opt lbl = Some thread.
+Definition in_cpu_thread thread := fun lbl => lbl_thread lbl = CpuTid thread.
 
 Definition in_chan chan := fun lbl => lbl_chan_opt lbl = Some chan.
 
@@ -332,7 +337,7 @@ Definition cpu_read' (lbl: SyLabel) := match lbl with
 end.
 
 Definition fpga_write' (lbl: SyLabel) := match lbl with
-  | EventLab (FpgaEvent (Fpga_write_resp _) _ _) => True
+  | EventLab (FpgaEvent (Fpga_write_resp _ _ _) _ _) => True
   | _ => False
 end.
 
@@ -351,6 +356,7 @@ Definition fpga_read_flush (lbl: SyLabel) := match lbl with
   | _ => False
 end.
 
+
 Definition write' := cpu_write' ∪₁ fpga_write'.
 
 Definition enabled st tid := exists st', TSOFPGA_step st (CpuFlush tid) st'. 
@@ -365,7 +371,7 @@ Definition TSO_fair tr st :=
 
 End TSOFPGA.
 
-Ltac unfolder' := unfold set_compl, cross_rel, cpu_write', cpu_read', fpga_write', fpga_read_resp', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_cpu_prop, def_lbl, in_thread, lbl_thread_opt, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
+Ltac unfolder' := unfold set_compl, cross_rel, cpu_write', cpu_read', fpga_write', fpga_read_resp', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
 
 Section TSOFPGA_Facts.
 
@@ -381,13 +387,14 @@ Proof.
 Qed.
 
 Lemma fpga_write_structure tlab (W: fpga_write' tlab):
-  exists chan index meta, tlab = EventLab (FpgaEvent (Fpga_write_resp chan) index meta).
+  exists chan loc val index meta, tlab = EventLab (FpgaEvent (Fpga_write_resp chan loc val) index meta).
 Proof.
   unfolder'. 
   destruct tlab eqn:WW; vauto.
   destruct e; vauto.
   destruct e; vauto.
-  eauto.
+  exists c, x, v, index, m.
+  auto.
 Qed.
 
 Lemma fpga_read_structure tlab (R: fpga_read_resp' tlab):
@@ -400,5 +407,8 @@ Proof.
   exists c, index, m, x, v.
   reflexivity.
 Qed.
+
+Lemma init_non_r r (Rr: is_r r) (INIT: is_init r): False.
+Proof. generalize Rr, INIT. unfolder'. by destruct r. Qed. 
 
 End TSOFPGA_Facts.

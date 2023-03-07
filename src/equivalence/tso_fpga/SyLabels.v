@@ -1,7 +1,10 @@
 Section SyLabels.
 
 Definition Chan := nat.
-Definition Tid := nat.
+Inductive Tid :=
+    | CpuTid (n : nat)
+    | FpgaTid
+    | InitTid.
 
 Definition Loc := nat.
 Definition Val := nat.
