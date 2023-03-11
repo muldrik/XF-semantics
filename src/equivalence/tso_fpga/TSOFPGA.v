@@ -1,6 +1,6 @@
 Require Import SyEvents.
 Require Import SyLabels.
-Require Import Execution.
+Require Import SyExecution.
 Require Import List.
 From hahn Require Import Hahn. 
 Require Import Lia.
@@ -371,7 +371,7 @@ Definition TSO_fair tr st :=
 
 End TSOFPGA.
 
-Ltac unfolder' := unfold set_compl, cross_rel, cpu_write', cpu_read', fpga_write', fpga_read_resp', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
+Ltac unfolder' := unfold set_compl, cross_rel, write', cpu_write', cpu_read', fpga_write', fpga_read_resp', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
 
 Section TSOFPGA_Facts.
 
