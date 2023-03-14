@@ -724,6 +724,12 @@ Lemma EXACT_CHAN_READS chan:
 Proof.
   Admitted.
 
+Lemma EXACT_CHAN_READ_REQS chan:
+  trace_length (trace_filter (fpga_read_req' ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
+Proof.
+  Admitted.
+
 Definition same_chan x y :=
   let chan := lbl_chan_opt x in
   chan = lbl_chan_opt y /\ chan <> None. 
@@ -1062,7 +1068,7 @@ Lemma read_resp_to_memread_lemma r
 exists p,
   ⟪THREAD_PROP: (fpga_mem_read' ∩₁ same_chan (trace_labels r)) (trace_labels p)⟫ /\
   (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
-  ⟪W_P_CORR: count_upto (fpga_read_resp' ∩₁ same_chan (trace_labels r)) r =
+  ⟪RS_MR_CORR: count_upto (fpga_read_resp' ∩₁ same_chan (trace_labels r)) r =
               count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) p⟫.
 Proof.
 simpl.
@@ -1085,6 +1091,36 @@ pose proof sim_subtraces_conv as TMP. specialize_full TMP.
 desc. exists j. splits; vauto.
 Qed.
 
+Lemma read_req_to_memread_lemma r
+    (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
+    (R: fpga_read_req' (trace_labels r)):
+exists p,
+  ⟪THREAD_PROP: (fpga_mem_read' ∩₁ same_chan (trace_labels r)) (trace_labels p)⟫ /\
+  (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
+  ⟪RQ_MR_CORR: count_upto (fpga_read_req' ∩₁ same_chan (trace_labels r)) r =
+              count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) p⟫.
+Proof.
+simpl.
+assert (DOM: NOmega.lt_nat_l r (trace_length tr)).
+{ destruct (classic (NOmega.lt_nat_l r (trace_length tr))); auto.
+  exfalso. apply ge_default in H. rewrite H in R.
+  unfolder'. intuition. }
+pose proof (fpga_read_req_structure _ R).
+desc.
+assert (same_chan (trace_labels r) ≡₁ in_chan chan).
+{ rewrite H. simpl. unfold same_chan. simpl.
+  unfold in_chan.
+  red. split; red; ins; desc; vauto. }
+apply set_extensionality in H0. rewrite H0 in *. 
+pose proof sim_subtraces_conv as TMP. specialize_full TMP.
+{ eapply (EXACT_CHAN_READ_REQS chan). }
+{ red. splits; eauto.
+  rewrite H. vauto. }
+{ auto. }
+desc. exists j. splits; vauto.
+Qed.
+
+
 Definition read2mem_read (r: nat) :=
   match (excluded_middle_informative (fpga_read_resp' (trace_labels r))) with
   | left R => (proj1_sig ((constructive_indefinite_description _ (read_resp_to_memread_lemma r R))))
@@ -1093,6 +1129,55 @@ Definition read2mem_read (r: nat) :=
     | right _ => 0
     end
   end.
+
+Definition read_req2mem_read (r: nat) :=
+  match (excluded_middle_informative (fpga_read_req' (trace_labels r))) with
+  | left R => (proj1_sig ((constructive_indefinite_description _ (read_req_to_memread_lemma r R))))
+  | right _ => 0
+  end.
+
+Ltac ex_des :=
+  destruct excluded_middle_informative; try by (unfolder'; desf).
+
+
+(* Lemma req_resp_same_memread rq rs (REQ: fpga_read_req' (trace_labels rq))
+      (RESP: fpga_read_resp' (trace_labels rs))
+      (META: meta_l (trace_labels rq) = meta_l (trace_labels rs))
+      (IN_TRACE_RQ: NOmega.lt_nat_l rq (trace_length tr))
+      (IN_TRACE_RS: NOmega.lt_nat_l rs (trace_length tr)):
+  read_req2mem_read rq = read2mem_read rs.
+Proof.
+  unfold read_req2mem_read, read2mem_read.
+  do 2 ex_des.
+  do 2 destruct (constructive_indefinite_description).
+  simpl; desf.
+  (* destruct (trace_labels rq); desf.
+  destruct (trace_labels rs); desf.
+  destruct e0, e; desf.
+  destruct e0, e; desf.
+  remember (FpgaEvent (Fpga_read_resp c x1 v) index m) as rsE.
+  remember (FpgaEvent (Fpga_read_req c0 x2) index0 m0) as rqE.
+  remember (state_before_event rqE) as st_rq.
+  remember (state_before_event rsE) as st_rs. *)
+  (* destruct (trace_labels rq); desf.
+  destruct (trace_labels rs); desf.
+  destruct e0, e; desf.
+  destruct e0, e; desf.
+  remember (FpgaEvent (Fpga_read_resp c x1 v) index m) as rsE.
+  remember (FpgaEvent (Fpga_read_req c0 x2) index0 m0) as rqE. *)
+  remember (TSi rq IN_TRACE_RQ def_lbl) as TS_RQ.
+  remember (TSi rs IN_TRACE_RS def_lbl) as TS_RS.
+  fold (trace_labels rq) in *.
+  fold (trace_labels rs) in *.
+  inversion TS_RQ.
+  all: try by (unfolder'; desf).
+  inversion TS_RS.
+  all: try by (unfolder'; desf).
+Qed. *)
+  
+
+
+
 
 (* Lemma mem_read_source: *)
 (*   let st := trace_states tr TR in *)
@@ -1186,11 +1271,11 @@ Proof.
   erewrite trace_index_simpl' in f; eauto.
   destruct rd; desf.
   destruct e; desf.
-  erewrite trace_index_simpl' in W_P_CORR; eauto.
+  erewrite trace_index_simpl' in RS_MR_CORR; eauto.
 
-  erewrite (count_same_chan_in_chan c) in W_P_CORR.
+  erewrite (count_same_chan_in_chan c) in RS_MR_CORR.
   2: { unfold in_chan; ins. }
-  erewrite (count_same_chan_in_chan c) in W_P_CORR.
+  erewrite (count_same_chan_in_chan c) in RS_MR_CORR.
   2: { unfold in_chan; ins. }
 
   assert (NOmega.lt_nat_l x (trace_length tr)) as IN_TR. { 
@@ -1217,7 +1302,7 @@ Proof.
        rewrite map_app, filterP_app, length_app. simpl.
        fold (trace_labels rsp).
        destruct (excluded_middle_informative ((fpga_read_resp' ∩₁ in_chan c) (trace_labels rsp))); vauto. rewrite trace_index_simpl' in n; vauto. destruct n; unfolder'; desf. }
-  rewrite W_P_CORR in BUF_SIZE.
+  rewrite RS_MR_CORR in BUF_SIZE.
  
   cut (count_upto (fpga_mem_read' ∩₁ in_chan c) (rsp + 1) <= count_upto (fpga_mem_read' ∩₁ in_chan c) x).
   { ins. lia. }
@@ -2302,6 +2387,19 @@ Proof.
       { subst chan. rewrite UPSTREAM. rewrite upds. simpl. auto. }
       rewrite updo; vauto; lia. }
 Qed.
+
+(* Lemma buffer_sources_upstream_rd i chan (DOM: NOmega.lt_nat_l i (trace_length tr)):
+  let buf := filter is_read_ups (up_bufs (states i) chan) in
+  let ip := count_upto (is_fpga_memread ∩₁ in_chan chan) i in
+  forall k l v meta (AT_K: Some (read_up l v, meta) = nth_error buf k),
+  exists ind, 
+    let lab_w := FpgaEvent (Fpga_write_resp chan l v) ind meta in
+    let w := trace_index lab_w in 
+    ⟪ WRITE_POS: nth_such (ip + k) (fpga_write' ∩₁ in_chan chan) w ⟫ /\
+    (* ⟪ WRITE_VALUE: trace_labels w =  ⟫ /\ *)
+    ⟪ WRITE_BEFORE: w < i ⟫ /\
+    ⟪ PROP_AFTER: i <= write2prop w ⟫ /\
+    ⟪ ENINIT: Eninit lab_w ⟫.  *)
 
 
 Lemma no_writes_no_buffer thread l i (DOM: NOmega.lt_nat_l i (trace_length tr))

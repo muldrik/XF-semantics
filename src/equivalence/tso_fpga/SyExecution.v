@@ -199,6 +199,7 @@ Definition ppoCpu := sb \ (W × R) ∩ (Cpu × Cpu).
 Definition ppoFpga := (⦗Rsp⦘ ⨾ poch ⨾ ⦗E \ RdRsp⦘) ∪ (⦗RdRsp⦘ ⨾ sb ⨾ ⦗E \ RdRsp⦘) ∪ allpair.
 Definition ppo := ppoCpu ∪ ppoFpga.
 
+(* add sb asyclic? *)
 Record Ax86Consistent := {
     sc_per_loc: acyclic ((poloc ∪ rf ∪ fr ∪ co) ∩ (Cpu × Cpu));
     propagation: acyclic (ppo ∪ fence ∪ rfe ∪ fre ∪ co);
