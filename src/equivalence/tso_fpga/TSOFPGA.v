@@ -134,7 +134,7 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
 | cpu_write w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs loc val thread index:
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
                  (EventLab (ThreadEvent thread index (Cpu_store loc val)))
-                 (mkState w_pool r_pool up_bufs down_bufs (upd sh_mem loc val) (upd cpu_bufs thread (cpu_bufs thread ++ cons (loc, val) nil)))
+                 (mkState w_pool r_pool up_bufs down_bufs sh_mem (upd cpu_bufs thread (cpu_bufs thread ++ cons (loc, val) nil)))
 | cpu_propagate w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs cpu_buf' loc val thread
       (CPU_BUF: cpu_bufs thread = cons (loc, val) cpu_buf'):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
