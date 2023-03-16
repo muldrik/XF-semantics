@@ -469,6 +469,28 @@ inversion STEP; subst; simpl in EQ; inv EQ.
 Qed. 
 
 
+Definition meta_l_helper s1 lbl s2 := match lbl with
+  | EventLab (FpgaEvent _ _ meta) => meta
+  | FpgaMemFlush channel => match head (up_bufs s1 channel) with 
+                              | Some (store_up loc val, meta) => meta
+                              | _ => 0
+                              end
+  | FpgaReadToUpstream channel => match last (up_bufs s2 channel) (store_up 0 0, 0) with
+                              | (read_up loc, meta) => meta
+                              | _ => 0
+                              end
+  | FpgaMemRead channel => match head (up_bufs s1 channel) with
+                              | Some (read_up loc, meta) => meta
+                              | _ => 0
+                              end
+  | _ => 0
+end.
+
+Definition meta_l i := match (excluded_middle_informative (NOmega.lt_nat_l i (trace_length tr))) with
+  | left IN_T => (meta_l_helper (states i) (trace_labels i) (states (S i)))
+  | _ => 0
+end.
+
 
 Definition is_store_ups (upsE: (UpstreamEntry * Mdata)) :=
   match upsE with
@@ -741,7 +763,8 @@ Lemma write2prop_fpga_lem w
     (W: fpga_write' (trace_labels w)):
 exists p,
   ⟪THREAD_PROP: (is_fpga_prop ∩₁ same_chan (trace_labels w)) (trace_labels p)⟫ /\
-  (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
+  (* ⟪SAME_META: meta_l (trace_labels w) = meta_l (trace_labels p)⟫ /\ *)
+  ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\
   ⟪W_P_CORR: count_upto (fpga_write' ∩₁ same_chan (trace_labels w)) w =
               count_upto (is_fpga_prop ∩₁ same_chan (trace_labels w)) p⟫.
 Proof.
@@ -917,7 +940,7 @@ Lemma write2prop_cpu_lem w
       (W: cpu_write' (trace_labels w)):
   exists p,
     ⟪THREAD_PROP: (is_cpu_prop ∩₁ same_thread (trace_labels w)) (trace_labels p)⟫ /\
-    (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
+    ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\
     ⟪W_P_CORR: count_upto (cpu_write' ∩₁ same_thread (trace_labels w)) w =
                count_upto (is_cpu_prop∩₁ same_thread (trace_labels w)) p⟫.
 Proof.
@@ -967,7 +990,7 @@ Proof.
   remember (trace_labels w) as tlab.
   unfold write2prop.
   destruct (excluded_middle_informative (cpu_write' (trace_labels w))); [clear W| by vauto].  
-  destruct (constructive_indefinite_description _ _) as [p [PROP CORR]]. simpl.
+  destruct (constructive_indefinite_description _ _) as [p [PROP [INT CORR]]]. simpl.
   pose proof (Nat.lt_trichotomy w p). des; auto.
   { subst. red in PROP. exfalso. 
     apply reg_write_structure in c. destruct c as [thread [index [loc [val H]]]].
@@ -1010,7 +1033,7 @@ Proof.
     desf.
   }
   destruct (excluded_middle_informative (fpga_write' (trace_labels w))).
-  destruct (constructive_indefinite_description _ _) as [p [PROP CORR]]. simpl.
+  destruct (constructive_indefinite_description _ _) as [p [PROP [INT CORR]]]. simpl.
   pose proof (Nat.lt_trichotomy w p). des; auto.
   { subst. red in PROP. exfalso. 
     apply fpga_write_structure in f. destruct f as [chan [loc [val [index [meta H0]]]]].
@@ -1091,7 +1114,36 @@ pose proof sim_subtraces_conv as TMP. specialize_full TMP.
 desc. exists j. splits; vauto.
 Qed.
 
-Lemma read_req_to_memread_lemma r
+(* Request madness *)
+
+(* Lemma write_req_to_resp_lemma w
+    (W: fpga_write_req' (trace_labels w)):
+exists p,
+  ⟪THREAD_PROP: (fpga_write' ∩₁ same_chan (trace_labels w)) (trace_labels p)⟫ /\
+  ⟪W_RS_CORR: count_upto (fpga_write_req' ∩₁ same_chan (trace_labels w)) w =
+              count_upto (fpga_write' ∩₁ same_chan (trace_labels w)) p⟫.
+simpl.
+simpl.
+assert (DOM: NOmega.lt_nat_l w (trace_length tr)).
+{ destruct (classic (NOmega.lt_nat_l w (trace_length tr))); auto.
+  exfalso. apply ge_default in H. rewrite H in W.
+  unfolder'. intuition. }
+pose proof (fpga_write_req_structure _ W). 
+desc.
+assert (same_chan (trace_labels w) ≡₁ in_chan chan).
+{ rewrite H. simpl. unfold same_chan. simpl.
+  unfold in_chan.
+  red. split; red; ins; desc; vauto. }
+apply set_extensionality in H0. rewrite H0 in *. 
+pose proof sim_subtraces_conv as TMP. specialize_full TMP.
+{ eapply (EXACT_CHAN_PROPS chan). }
+{ red. splits; eauto.
+  rewrite H. vauto. }
+{ auto. }
+desc. exists j. splits; vauto.
+Qed. *)
+
+(* Lemma read_req_to_memread_lemma r
     (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
     (R: fpga_read_req' (trace_labels r)):
 exists p,
@@ -1100,25 +1152,7 @@ exists p,
   ⟪RQ_MR_CORR: count_upto (fpga_read_req' ∩₁ same_chan (trace_labels r)) r =
               count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) p⟫.
 Proof.
-simpl.
-assert (DOM: NOmega.lt_nat_l r (trace_length tr)).
-{ destruct (classic (NOmega.lt_nat_l r (trace_length tr))); auto.
-  exfalso. apply ge_default in H. rewrite H in R.
-  unfolder'. intuition. }
-pose proof (fpga_read_req_structure _ R).
-desc.
-assert (same_chan (trace_labels r) ≡₁ in_chan chan).
-{ rewrite H. simpl. unfold same_chan. simpl.
-  unfold in_chan.
-  red. split; red; ins; desc; vauto. }
-apply set_extensionality in H0. rewrite H0 in *. 
-pose proof sim_subtraces_conv as TMP. specialize_full TMP.
-{ eapply (EXACT_CHAN_READ_REQS chan). }
-{ red. splits; eauto.
-  rewrite H. vauto. }
-{ auto. }
-desc. exists j. splits; vauto.
-Qed.
+Qed. *)
 
 
 Definition read2mem_read (r: nat) :=
@@ -1130,14 +1164,14 @@ Definition read2mem_read (r: nat) :=
     end
   end.
 
-Definition read_req2mem_read (r: nat) :=
+(* Definition read_req2mem_read (r: nat) :=
   match (excluded_middle_informative (fpga_read_req' (trace_labels r))) with
   | left R => (proj1_sig ((constructive_indefinite_description _ (read_req_to_memread_lemma r R))))
   | right _ => 0
-  end.
+  end. *)
 
 Ltac ex_des :=
-  destruct excluded_middle_informative; try by (unfolder'; desf).
+  destruct excluded_middle_informative; try by (exfalso; unfolder'; desf).
 
 
 (* Lemma req_resp_same_memread rq rs (REQ: fpga_read_req' (trace_labels rq))
@@ -1388,7 +1422,6 @@ Definition writepair' req resp := is_wr_req req /\ is_wr_resp resp /\ meta req =
 Definition fenceonepair' req resp := is_fence_req_one req /\ is_fence_resp_one resp /\ meta req = meta resp.
 Definition fenceallpair' req resp := is_fence_req_all req /\ is_fence_resp_all resp /\ meta req = meta resp.
 Definition pair' req resp := readpair' req resp \/ writepair' req resp \/ fenceonepair' req resp \/ fenceallpair' req resp.
-  
 
 Definition nth_such n S i := count_upto S i = n /\ S (trace_labels i).
 
@@ -2388,6 +2421,53 @@ Proof.
       rewrite updo; vauto; lia. }
 Qed.
 
+Ltac same_chan_prover := ins; apply set_extensionality; unfold same_chan, in_chan; simpl; red; splits; red; ins; desc; vauto.
+
+(* write_req -> (попало в pre-stage) -> resp (попало в upstream) -> prop (из upstream в память) *)
+(* если write_req, то exists i: write_resp (trace_labels i) /\ loc_req = loc_resp /\ meta_req = meta_resp *)
+
+(* req_req (pre_stege), meta -> to_upstream, meta -> read_mem (to_downstream), meta -> read_resp, meta *)
+
+Lemma w2p_preserves_meta w (DOM: NOmega.lt_nat_l w (trace_length tr)) (W: fpga_write' (trace_labels w)):
+  meta_l w = meta_l (write2prop w).
+Proof.
+  unfold write2prop.
+  ex_des.
+  ex_des.
+  destruct (constructive_indefinite_description).
+  simpl.
+  desf.
+  unfold meta_l.
+  destruct (excluded_middle_informative); vauto.
+  destruct excluded_middle_informative; vauto.
+
+  destruct THREAD_PROP.
+  remember (TSi x l0 def_lbl) as STEP.
+  inversion STEP; fold (trace_labels x) in *.
+  all: try by (exfalso; unfolder'; desf).
+  forward eapply (buffer_sources_upstream_wr x channel l0 0); eauto.
+  { rewrite <- H2. simpl. rewrite UPSTREAM. simpl. eauto. }
+  ins.
+  desf.
+  assert (same_chan (trace_labels w) = in_chan channel) as CH_R. { rewrite <- H3 in H0; destruct (trace_labels w); desf. destruct e; desf. destruct e; desf. unfold same_chan in *. same_chan_prover. }
+  rewrite CH_R in W_P_CORR.
+  rewrite Nat.add_0_r in WRITE_POS.
+  rewrite <- W_P_CORR in WRITE_POS.
+  assert (nth_such (count_upto (fpga_write' ∩₁ in_chan channel) w) (fpga_write' ∩₁ in_chan channel) w).
+  { apply nth_such_self. destruct (trace_labels w); desf. do 2 (destruct e; desf). rewrite <- CH_R. split; vauto.  }
+  assert (w = trace_index (FpgaEvent (Fpga_write_resp channel loc val) ind meta)) by (eapply nth_such_unique; eauto).
+  subst w.
+  unfold meta_l_helper.
+  rewrite (trace_index_simpl').
+  2: vauto.
+  rewrite <- H3.
+  simpl.
+  rewrite UPSTREAM. 
+  simpl; vauto.
+Qed.
+
+
+
 (* Lemma buffer_sources_upstream_rd i chan (DOM: NOmega.lt_nat_l i (trace_length tr)):
   let buf := filter is_read_ups (up_bufs (states i) chan) in
   let ip := count_upto (is_fpga_memread ∩₁ in_chan chan) i in
@@ -3184,6 +3264,15 @@ Proof.
         rewrite <- Heqst in TSi.
         inversion TSi; vauto.
         all: try by (unfold fpga_mem_read' in MEM_READ; desf).
+        (* Уже есть: read_resp, read_resp -> mem_read (в прошлом).
+           Хотим: рассуждать про пары (read_req, read_resp)
+           read_req -> read_to_upstream -> mem_read
+           mem_read (to downstream) <-> read_resp
+
+
+           
+           rf (write, read_resp)
+        *)
         assert (SyEvents.loc r = loc). { admit. }
         rewrite H0.     
         admit.

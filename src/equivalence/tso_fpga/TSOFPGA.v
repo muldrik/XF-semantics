@@ -150,6 +150,11 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
       (SH_MEM: sh_mem loc = val):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
                  (EventLab (ThreadEvent thread index (Cpu_load loc val)))
+                 (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
+| cpu_fence w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs thread index
+      (NO_WB: cpu_bufs thread = nil):
+    TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
+                 (EventLab (ThreadEvent thread index (Cpu_fence)))
                  (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs).
 
 
@@ -356,6 +361,11 @@ Definition fpga_read_req' (lbl: SyLabel) := match lbl with
   | _ => False
 end.
 
+Definition fpga_write_req' (lbl: SyLabel) := match lbl with
+  | EventLab (FpgaEvent (Fpga_write_req _ _ _) _ _) => True
+  | _ => False
+end.
+
 Definition fpga_mem_read' (lbl: SyLabel) := match lbl with
   | FpgaMemRead _ => True
   | _ => False
@@ -366,11 +376,11 @@ Definition fpga_read_flush (lbl: SyLabel) := match lbl with
   | _ => False
 end.
 
-Definition meta_l (lbl: SyLabel) :=
+(* Definition meta_l (lbl: SyLabel) :=
   match lbl with
   | EventLab (FpgaEvent _ m _) => m
   | _ => 0
-  end.
+  end. *)
 
 
 Definition write' := cpu_write' ∪₁ fpga_write'.
@@ -387,7 +397,7 @@ Definition TSO_fair tr st :=
 
 End TSOFPGA.
 
-Ltac unfolder' := unfold set_compl, cross_rel, write', cpu_write', cpu_read', fpga_write', fpga_read_req', fpga_read_resp', fpga_mem_read', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
+Ltac unfolder' := unfold set_compl, cross_rel, write', cpu_write', cpu_read', fpga_write', fpga_read_req', fpga_write_req', fpga_read_resp', fpga_mem_read', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
 
 Section TSOFPGA_Facts.
 
@@ -410,6 +420,17 @@ Proof.
   destruct e; vauto.
   destruct e; vauto.
   exists c, index, m, x.
+  auto.
+Qed.
+
+Lemma fpga_write_req_structure tlab (W: fpga_write_req' tlab):
+  exists chan index meta loc val, tlab = EventLab (FpgaEvent (Fpga_write_req chan loc val) index meta).
+Proof.
+  unfolder'. 
+  destruct tlab eqn:WW; vauto.
+  destruct e; vauto.
+  destruct e; vauto.
+  exists c, index, m, x, v.
   auto.
 Qed.
 
