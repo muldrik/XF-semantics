@@ -224,7 +224,6 @@ Proof.
   }
 Qed. 
 
-
 Lemma tb_SPO: strict_total_order Eninit trace_before.
 Proof.
   red. split.
@@ -420,6 +419,8 @@ Proof.
   apply NOmega_add_le.
 Qed. 
 
+Definition nth_such n S i := count_upto S i = n /\ S (trace_labels i).
+
 Lemma count_upto_next i F:
   count_upto F (S i) = count_upto F i + check F (trace_labels i).
 Proof.
@@ -436,6 +437,25 @@ Proof.
   unfold count_upto. rewrite seq_add.
   rewrite !map_app, !filterP_app, !length_app.
   lia. 
+Qed. 
+
+Lemma nth_such_self (F: SyLabel -> Prop) i (Fi: F (trace_labels i)):
+  nth_such (count_upto F i) F i.
+Proof.
+  red. split; auto.
+Qed. 
+
+Lemma nth_such_unique k F i j (NTH_I: nth_such k F i) (NTH_J: nth_such k F j):
+  i = j.
+Proof.
+  red in NTH_I, NTH_J. desc. 
+  pose proof (Nat.lt_trichotomy i j) as LT. des; auto.
+  { exfalso. apply lt_diff in LT. desc. subst.
+    forward eapply (@count_upto_more (S i) (i + S d) F) as MORE; [lia| ].
+    rewrite count_upto_next, check1 in MORE; auto. lia. }
+  { exfalso. apply lt_diff in LT. desc. subst.
+    forward eapply (@count_upto_more (S j) (j + S d) F) as MORE; [lia| ].
+    rewrite count_upto_next, check1 in MORE; auto. lia. }  
 Qed. 
 
 (* TODO: generalize, move to hahn? *)
@@ -469,7 +489,7 @@ inversion STEP; subst; simpl in EQ; inv EQ.
 Qed. 
 
 
-Definition meta_l_helper s1 lbl s2 := match lbl with
+(* Definition meta_l_helper s1 lbl s2 := match lbl with
   | EventLab (FpgaEvent _ _ meta) => meta
   | FpgaMemFlush channel => match head (up_bufs s1 channel) with 
                               | Some (store_up loc val, meta) => meta
@@ -489,7 +509,7 @@ end.
 Definition meta_l i := match (excluded_middle_informative (NOmega.lt_nat_l i (trace_length tr))) with
   | left IN_T => (meta_l_helper (states i) (trace_labels i) (states (S i)))
   | _ => 0
-end.
+end. *)
 
 
 Definition is_store_ups (upsE: (UpstreamEntry * Mdata)) :=
@@ -546,9 +566,52 @@ inversion STEP; subst; simpl in EQ; inv EQ.
 }
 Qed.
 
+Lemma upstream_size_inv_read st1 st2 lbl chan (STEP: TSOFPGA_step st1 lbl st2):
+length (filter is_read_ups (up_bufs st1 chan)) +
+check (fpga_read_ups' ∩₁ in_chan chan) lbl =
+check (fpga_mem_read' ∩₁ in_chan chan) lbl +
+length (filter is_read_ups (up_bufs st2 chan)).
+Proof.
+destruct st1 as [wp1 rp1 up_buf1 db1 shm1 cpu_b1]. destruct st2 as [wp2 rp2 up_buf2 db2 shm2 cpu_b2]. simpl.
+destruct (classic (lbl_chan_opt lbl = Some chan)) as [EQ | NEQ] .
+2: { forward eapply upstream_same_transition as SAME_BUF; eauto. simpl in SAME_BUF.
+      rewrite SAME_BUF. 
+      repeat rewrite check0; [lia| |].
+      all: apply set_compl_inter; right; vauto. }
+inversion STEP; subst; simpl in EQ; inv EQ.
+ all: try (repeat rewrite check0; [lia| |]; apply set_compl_inter; left; vauto).
+{ rewrite check0.
+  2: { unfolder'. simpl. intuition. }
+  rewrite check0.
+  2: { unfolder'. simpl. intuition. }
+  rewrite upds. rewrite filter_app. rewrite length_app. by simpl. }
+{ rewrite upds. rewrite UPSTREAM. simpl.
+  rewrite check0.
+  2: { unfolder'. simpl. intuition. }
+  rewrite check0; [| unfolder'; simpl; intuition].
+  lia. }
+{ rewrite check1.
+  2: { unfolder'. simpl. intuition. }
+  rewrite check0.
+  2: { unfolder'. simpl. intuition. }
+  rewrite upds. rewrite filter_app. rewrite length_app. simpl.
+  lia.
+}
+{
+  rewrite check0.
+  2: { unfolder'. simpl. intuition. }
+  rewrite check1.
+  2: { unfolder'. simpl. intuition. }
+  rewrite UPSTREAM.
+  rewrite upds. 
+  simpl.
+  lia.
+}
+Qed.
+
 
 (* TODO: Delete *)
-Lemma upstream_size_inv_read st1 st2 lbl chan (STEP: TSOFPGA_step st1 lbl st2):
+Lemma downstream_size_inv st1 st2 lbl chan (STEP: TSOFPGA_step st1 lbl st2):
 length (down_bufs st1 chan) +
 check (fpga_mem_read' ∩₁ in_chan chan) lbl =
 check (fpga_read_resp' ∩₁ in_chan chan) lbl +
@@ -623,6 +686,31 @@ Proof.
   forward eapply (TSi i) with (d := def_lbl) as TSi; vauto.
 Qed.
 
+Lemma buffer_size_upstream_read chan i (DOM: NOmega.le (NOnum i) (trace_length tr)):
+  count_upto (fpga_read_ups' ∩₁ in_chan chan) i = 
+  count_upto (fpga_mem_read' ∩₁ in_chan chan) i + length (filter is_read_ups (up_bufs (states i) chan)).
+Proof.
+  induction i.
+  { simpl. unfold count_upto. rewrite seq0. simpl.
+    pose proof TS0 as TS0. simpl in TS0. by rewrite <- TS0. }
+  remember (states (S i)) as s. simpl.
+  unfold count_upto. rewrite !seqS, !Nat.add_0_l, !map_app, !filterP_app, !length_app. simpl.
+  fold (count_upto (fpga_read_ups' ∩₁ in_chan chan) i).
+  fold (count_upto (fpga_mem_read' ∩₁ in_chan chan) i).
+  specialize_full IHi.
+  { apply NOmega.le_trans with (m := NOnum (S i)); vauto. } 
+  fold (check (fpga_read_ups' ∩₁ in_chan chan) (trace_nth i tr def_lbl)). 
+  fold (check (fpga_mem_read' ∩₁ in_chan chan) (trace_nth i tr def_lbl)). 
+  remember (states i) as st_prev.
+  rewrite IHi.
+  rewrite <- !Nat.add_assoc.
+  f_equal. 
+
+  simpl in IHi. 
+  apply upstream_size_inv_read.
+  forward eapply (TSi i) with (d := def_lbl) as TSi; vauto.
+Qed.
+
 Lemma buffer_size_downstream chan i (DOM: NOmega.le (NOnum i) (trace_length tr)):
   count_upto (fpga_read_resp' ∩₁ in_chan chan) i + length (down_bufs (states i) chan)= 
   count_upto (fpga_mem_read' ∩₁ in_chan chan) i .
@@ -644,7 +732,7 @@ Proof.
   f_equal. 
 
   simpl in IHi. 
-  forward eapply upstream_size_inv_read; eauto.
+  forward eapply downstream_size_inv; eauto.
   forward eapply (TSi i) with (d := def_lbl) as TSi; vauto.
 Qed.
 
@@ -746,11 +834,25 @@ Lemma EXACT_CHAN_READS chan:
 Proof.
   Admitted.
 
-Lemma EXACT_CHAN_READ_REQS chan:
+
+(* Lemma EXACT_CHAN_READ_FLUSH chan:
   trace_length (trace_filter (fpga_read_req' ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_read_flush ∩₁ in_chan chan) tr).
+Proof.
+  Admitted. *)
+
+Lemma EXACT_CHAN_MEMREADS chan:
+  trace_length (trace_filter (fpga_read_ups' ∩₁ in_chan chan) tr) =
   trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
 Proof.
   Admitted.
+
+(*
+Lemma EXACT_CHAN_WR_REQS chan:
+  trace_length (trace_filter (fpga_write_req' ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_write' ∩₁ in_chan chan) tr).
+Proof.
+  Admitted. *)
 
 Definition same_chan x y :=
   let chan := lbl_chan_opt x in
@@ -1064,6 +1166,7 @@ Proof.
   { vauto. }
 Qed. 
 
+
 Lemma w2p_later w (W: write' (trace_labels w)):
   w < write2prop w.
 Proof.
@@ -1072,25 +1175,41 @@ Proof.
   apply w2p_later_fpga. auto.
 Qed.
 
-(* Порядок propagate в основную память *)
-(* Definition vis (e: Event) :=
-  match (excluded_middle_informative (is_cpu_wr e)) with
-  | left W => write2prop (trace_index e)
-  | right _ => match (excluded_middle_informative (is_wr_resp e)) with
-    | left W => write2prop (trace_index e)
-    | right _ => (trace_index e)
-    end
-  end. 
-
-Definition vis_lt := is_init × Eninit ∪ ⦗Eninit⦘ ⨾ (fun x y => vis x < vis y) ⨾ ⦗Eninit⦘.  *)
-
+Lemma memread_to_read_resp_lemma r
+    (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
+    (MR: fpga_mem_read' (trace_labels r)):
+exists p,
+  ⟪THREAD_PROP: (fpga_read_resp' ∩₁ same_chan (trace_labels r)) (trace_labels p)⟫ /\
+  ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\
+  ⟪RS_MR_CORR: count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) r =
+              count_upto (fpga_read_resp' ∩₁ same_chan (trace_labels r)) p⟫.
+Proof.
+simpl.
+assert (DOM: NOmega.lt_nat_l r (trace_length tr)).
+{ destruct (classic (NOmega.lt_nat_l r (trace_length tr))); auto.
+  exfalso. apply ge_default in H. rewrite H in MR.
+  unfolder'. intuition. }
+pose proof (fpga_memread_structure _ MR).
+desc.
+assert (same_chan (trace_labels r) ≡₁ in_chan chan).
+{ rewrite H. simpl. unfold same_chan. simpl.
+  unfold in_chan.
+  red. split; red; ins; desc; vauto. }
+apply set_extensionality in H0. rewrite H0 in *. 
+pose proof sim_subtraces_conv as TMP. specialize_full TMP.
+{ symmetry. eapply (EXACT_CHAN_READS chan). }
+{ red. splits; eauto.
+  rewrite H. vauto. }
+{ auto. }
+desc. exists j. splits; vauto.
+Qed.
 
 Lemma read_resp_to_memread_lemma r
     (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
     (R: fpga_read_resp' (trace_labels r)):
 exists p,
   ⟪THREAD_PROP: (fpga_mem_read' ∩₁ same_chan (trace_labels r)) (trace_labels p)⟫ /\
-  (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
+  ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\
   ⟪RS_MR_CORR: count_upto (fpga_read_resp' ∩₁ same_chan (trace_labels r)) r =
               count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) p⟫.
 Proof.
@@ -1114,46 +1233,40 @@ pose proof sim_subtraces_conv as TMP. specialize_full TMP.
 desc. exists j. splits; vauto.
 Qed.
 
-(* Request madness *)
-
-(* Lemma write_req_to_resp_lemma w
-    (W: fpga_write_req' (trace_labels w)):
+Lemma read_ups_to_memread_lemma r
+    (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
+    (R: fpga_read_ups' (trace_labels r)):
 exists p,
-  ⟪THREAD_PROP: (fpga_write' ∩₁ same_chan (trace_labels w)) (trace_labels p)⟫ /\
-  ⟪W_RS_CORR: count_upto (fpga_write_req' ∩₁ same_chan (trace_labels w)) w =
-              count_upto (fpga_write' ∩₁ same_chan (trace_labels w)) p⟫.
+  ⟪R_PROP: (fpga_mem_read' ∩₁ same_chan (trace_labels r)) (trace_labels p)⟫ /\
+  (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
+  ⟪RS_MR_CORR: count_upto (fpga_read_ups' ∩₁ same_chan (trace_labels r)) r =
+              count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) p⟫.
+Proof.
 simpl.
-simpl.
-assert (DOM: NOmega.lt_nat_l w (trace_length tr)).
-{ destruct (classic (NOmega.lt_nat_l w (trace_length tr))); auto.
-  exfalso. apply ge_default in H. rewrite H in W.
+assert (DOM: NOmega.lt_nat_l r (trace_length tr)).
+{ destruct (classic (NOmega.lt_nat_l r (trace_length tr))); auto.
+  exfalso. apply ge_default in H. rewrite H in R.
   unfolder'. intuition. }
-pose proof (fpga_write_req_structure _ W). 
+pose proof (fpga_rflush_structure _ R). 
 desc.
-assert (same_chan (trace_labels w) ≡₁ in_chan chan).
+assert (same_chan (trace_labels r) ≡₁ in_chan chan).
 { rewrite H. simpl. unfold same_chan. simpl.
   unfold in_chan.
   red. split; red; ins; desc; vauto. }
 apply set_extensionality in H0. rewrite H0 in *. 
 pose proof sim_subtraces_conv as TMP. specialize_full TMP.
-{ eapply (EXACT_CHAN_PROPS chan). }
+{ eapply (EXACT_CHAN_MEMREADS chan). }
 { red. splits; eauto.
   rewrite H. vauto. }
 { auto. }
 desc. exists j. splits; vauto.
-Qed. *)
+Qed.
 
-(* Lemma read_req_to_memread_lemma r
-    (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
-    (R: fpga_read_req' (trace_labels r)):
-exists p,
-  ⟪THREAD_PROP: (fpga_mem_read' ∩₁ same_chan (trace_labels r)) (trace_labels p)⟫ /\
-  (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
-  ⟪RQ_MR_CORR: count_upto (fpga_read_req' ∩₁ same_chan (trace_labels r)) r =
-              count_upto (fpga_mem_read' ∩₁ same_chan (trace_labels r)) p⟫.
-Proof.
-Qed. *)
-
+Definition read_ups2mem_read (r: nat) :=
+  match (excluded_middle_informative (fpga_read_ups' (trace_labels r))) with
+  | left R => (proj1_sig ((constructive_indefinite_description _ (read_ups_to_memread_lemma r R))))
+  | right _ => 0
+  end.
 
 Definition read2mem_read (r: nat) :=
   match (excluded_middle_informative (fpga_read_resp' (trace_labels r))) with
@@ -1164,14 +1277,134 @@ Definition read2mem_read (r: nat) :=
     end
   end.
 
+Definition mem_read2read (r: nat) :=
+  match (excluded_middle_informative (fpga_mem_read' (trace_labels r))) with
+  | left R => (proj1_sig ((constructive_indefinite_description _ (memread_to_read_resp_lemma r R))))
+  | right _ => 0
+  end.
+
+Ltac ex_des :=
+  destruct excluded_middle_informative; try by (exfalso; unfolder'; desf).
+
+Lemma mr2r_later_fpga mr (MR: fpga_mem_read' (trace_labels mr)):
+  mr < mem_read2read mr.
+Proof.
+  remember (trace_labels mr) as tlab.
+  unfold mem_read2read.
+  ex_des.
+  destruct (constructive_indefinite_description); desf.
+  pose proof (Nat.lt_trichotomy mr x). des; auto.
+  { subst. red in THREAD_PROP. exfalso. 
+    apply fpga_memread_structure in f. destruct f as [chan [loc [val [meta H0]]]].
+    rewrite H0 in THREAD_PROP. desc. vauto. }
+  exfalso. rename H into LT. 
+  apply fpga_memread_structure in f. destruct f as [chan [loc [val [meta TLAB]]]].
+  forward eapply (buffer_size_downstream chan (x + 1)) as BUF_SIZE.
+  { contra GE. forward eapply (proj2 (ge_default x)) as P_DEF. 
+    { red. intros. apply GE. simpl. red in H. destruct tr; vauto.
+      simpl in *. lia. }
+    red in THREAD_PROP. rewrite P_DEF in THREAD_PROP.
+    generalize THREAD_PROP. unfolder'. intuition. }
+  assert (same_chan (trace_labels mr) = in_chan chan) as RESTR_EQUIV. 
+  { apply set_extensionality. rewrite TLAB. simpl.
+    unfold same_chan, in_cpu_thread. simpl. red. splits; red; ins; desc; vauto. }
+  rewrite RESTR_EQUIV in RS_MR_CORR.
+  replace (count_upto (fpga_read_resp' ∩₁ in_chan chan) (x + 1)) with ((count_upto (fpga_read_resp' ∩₁ in_chan chan) x) + 1) in BUF_SIZE.
+  2: { unfold count_upto.
+       rewrite Nat.add_1_r with (n := x), seqS, Nat.add_0_l.
+       rewrite map_app, filterP_app, length_app. simpl.
+       rewrite RESTR_EQUIV in THREAD_PROP.
+       destruct (excluded_middle_informative ((fpga_read_resp' ∩₁ in_chan chan) (trace_nth x tr def_lbl))); vauto. }
+  rewrite <- RS_MR_CORR in BUF_SIZE.
+  cut (count_upto (fpga_mem_read' ∩₁ in_chan chan) (x + 1) <= count_upto (fpga_mem_read' ∩₁ in_chan chan) mr).
+  { ins. lia. }
+  apply count_upto_more. lia. 
+Qed. 
+
+Lemma r_up2mem_later_fpga mr (MR: fpga_read_ups' (trace_labels mr)):
+  mr < read_ups2mem_read mr.
+Proof.
+  remember (trace_labels mr) as tlab.
+  unfold read_ups2mem_read.
+  ex_des.
+  destruct (constructive_indefinite_description); desf.
+  pose proof (Nat.lt_trichotomy mr x). des; auto.
+  { subst. red in R_PROP. exfalso. 
+    apply fpga_rflush_structure in f. destruct f as [chan [loc [meta H0]]].
+    rewrite H0 in R_PROP. desc. vauto. }
+  exfalso. rename H into LT. 
+  apply fpga_rflush_structure in f. destruct f as [chan [loc [meta TLAB]]].
+  forward eapply (buffer_size_upstream_read chan (x + 1)) as BUF_SIZE.
+  { contra GE. forward eapply (proj2 (ge_default x)) as P_DEF. 
+    { red. intros. apply GE. simpl. red in H. destruct tr; vauto.
+      simpl in *. lia. }
+    red in R_PROP. rewrite P_DEF in R_PROP.
+    generalize R_PROP. unfolder'. intuition. }
+  assert (same_chan (trace_labels mr) = in_chan chan) as RESTR_EQUIV. 
+  { apply set_extensionality. rewrite TLAB. simpl.
+    unfold same_chan, in_cpu_thread. simpl. red. splits; red; ins; desc; vauto. }
+  rewrite RESTR_EQUIV in RS_MR_CORR.
+  replace (count_upto (fpga_mem_read' ∩₁ in_chan chan) (x + 1)) with ((count_upto (fpga_mem_read' ∩₁ in_chan chan) x) + 1) in BUF_SIZE.
+  2: { unfold count_upto.
+       rewrite Nat.add_1_r with (n := x), seqS, Nat.add_0_l.
+       rewrite map_app, filterP_app, length_app. simpl.
+       rewrite RESTR_EQUIV in R_PROP.
+       destruct (excluded_middle_informative ((fpga_mem_read' ∩₁ in_chan chan) (trace_nth x tr def_lbl))); vauto. }
+  rewrite <- RS_MR_CORR in BUF_SIZE.
+  cut (count_upto (fpga_read_ups' ∩₁ in_chan chan) (x + 1) <= count_upto (fpga_read_ups' ∩₁ in_chan chan) mr).
+  { ins. lia. }
+  apply count_upto_more. lia. 
+Qed. 
+
+(* Порядок propagate в основную память *)
+(* Definition vis (e: Event) :=
+  match (excluded_middle_informative (is_cpu_wr e)) with
+  | left W => write2prop (trace_index e)
+  | right _ => match (excluded_middle_informative (is_wr_resp e)) with
+    | left W => write2prop (trace_index e)
+    | right _ => (trace_index e)
+    end
+  end. 
+
+Definition vis_lt := is_init × Eninit ∪ ⦗Eninit⦘ ⨾ (fun x y => vis x < vis y) ⨾ ⦗Eninit⦘.  *)
+
+
+
+
+
+Lemma read2mem2read r
+    (R: fpga_read_resp' (trace_labels r)):
+  (mem_read2read (read2mem_read r)) = r.
+Proof.
+  unfold read2mem_read.
+  ex_des.
+  destruct constructive_indefinite_description; ins; desf.
+  unfold mem_read2read.
+  ex_des.
+  destruct constructive_indefinite_description; ins; desf.
+  destruct THREAD_PROP as [MR RX_CHAN].
+  destruct THREAD_PROP0 as [RSP XX0_CHAN'].
+  assert (same_chan (trace_labels x) = same_chan (trace_labels r)) as CH'.
+  { apply set_extensionality. unfold same_chan in *. destruct RX_CHAN. rewrite H. split; red; ins. }
+  assert (same_chan (trace_labels x0) = same_chan (trace_labels r)) as CH''.
+  { apply set_extensionality. rewrite <- CH'. unfold same_chan in *. destruct XX0_CHAN', CH'. rewrite <- H. split; red; ins; vauto. }
+  rewrite CH' in *.
+  rewrite RS_MR_CORR0 in RS_MR_CORR.
+  forward eapply (nth_such_self (fpga_read_resp' ∩₁ same_chan (trace_labels r)) r). { unfolder'. splits; eauto. destruct RX_CHAN. vauto. }
+  forward eapply (nth_such_self (fpga_read_resp' ∩₁ same_chan (trace_labels r)) x0). { rewrite <- CH''. unfolder'. destruct XX0_CHAN'. destruct (trace_labels x0); desf. }
+  ins.
+  apply (nth_such_unique (count_upto (fpga_read_resp' ∩₁ same_chan (trace_labels r)) r) (fpga_read_resp' ∩₁ same_chan (trace_labels r)) x0 r); vauto.
+Qed.
+(* down_sources -> mem_to_resp_saves_info *)
+(*  *)
+(* read buffer sources down *)
+
 (* Definition read_req2mem_read (r: nat) :=
   match (excluded_middle_informative (fpga_read_req' (trace_labels r))) with
   | left R => (proj1_sig ((constructive_indefinite_description _ (read_req_to_memread_lemma r R))))
   | right _ => 0
   end. *)
 
-Ltac ex_des :=
-  destruct excluded_middle_informative; try by (exfalso; unfolder'; desf).
 
 
 (* Lemma req_resp_same_memread rq rs (REQ: fpga_read_req' (trace_labels rq))
@@ -1286,11 +1519,11 @@ Proof.
   inv STEP'; desf.
   simpl.
   rewrite UPSTREAM.
-  assert ((read_up loc, meta) :: up_buf' = ((read_up loc, meta) :: nil) ++ up_buf') by vauto.
+  assert ((read_up l, m) :: up_buf' = ((read_up l, m) :: nil) ++ up_buf') by vauto.
   rewrite H.
   erewrite filter_app.
   rewrite length_app.
-  assert (is_read_ups (read_up loc, meta)) by vauto.
+  assert (is_read_ups (read_up l, m)) by vauto.
   simpl.
   lia.
 Qed.
@@ -1343,13 +1576,27 @@ Proof.
   apply count_upto_more. lia. 
 Qed.
 
-Lemma r_vis e (Rr: is_cpu_rd e): vis' e = trace_index e.
+Lemma r_vis_cpu e (Rr: is_cpu_rd e): vis' e = trace_index e.
 Proof.
   unfold vis'.
   generalize Rr. unfolder'. destruct e; vauto.
   destruct e; ins.
   all: destruct (excluded_middle_informative _ ); intuition.
 Qed. 
+
+Lemma r_vis e (R: is_r e) (EN: Eninit e): vis' e <= trace_index e.
+Proof.
+  unfold vis'.
+  generalize R. unfolder'. destruct e; vauto.
+  destruct e; ins.
+  destruct excluded_middle_informative; vauto.
+  destruct e; desf.
+  ins.
+  forward eapply (rd_resp_after_memread (FpgaEvent (Fpga_read_resp c x v) index m)); eauto.
+  ins.
+  lia.
+Qed.
+
 
 Lemma vis_SPO:
   strict_partial_order vis_lt'. 
@@ -1375,7 +1622,6 @@ Proof.
   red. ins. red in H. desc. lia. 
 Qed. 
 
-(* True only for normal vis. Can add WR constraint *)
 Lemma TI_LE_VIS e (ENINIT: Eninit e) (NOT_FPGA_RD: ~is_rd_resp e): trace_index e <= vis' e.
 Proof.
   unfold vis'. simpl.
@@ -1388,6 +1634,16 @@ Proof.
   { apply Nat.lt_le_incl. apply w2p_later_fpga.
   unfold trace_labels. rewrite trace_index_simpl; auto. }
   destruct (excluded_middle_informative (is_rd_resp e)); [vauto| ].
+  lia.
+Qed.
+
+Lemma TI_GE_VIS e (ENINIT: Eninit e) (NOT_W: ~is_w e): trace_index e >= vis' e.
+Proof.
+  unfold vis'. simpl.
+  ex_des.
+  ex_des.
+  destruct excluded_middle_informative; [|lia].
+  forward eapply (rd_resp_after_memread e); vauto.
   lia.
 Qed.
 
@@ -1416,6 +1672,8 @@ Definition rf' w r :=
   | right _ => latest_of_by (fun e => loc e = loc r /\ vis_lt' e r /\ EG e /\ is_w e ) vis_lt' w
   end.
 
+(* Lemma tid_neq_extid_neq e1 e2: tid e1 <> tid e2 -> exact_tid e1 <> exact_tid e2. *)
+
 
 Definition readpair' req resp := is_rd_req req /\ is_rd_resp resp /\ meta req = meta resp.
 Definition writepair' req resp := is_wr_req req /\ is_wr_resp resp /\ meta req = meta resp.
@@ -1423,7 +1681,6 @@ Definition fenceonepair' req resp := is_fence_req_one req /\ is_fence_resp_one r
 Definition fenceallpair' req resp := is_fence_req_all req /\ is_fence_resp_all resp /\ meta req = meta resp.
 Definition pair' req resp := readpair' req resp \/ writepair' req resp \/ fenceonepair' req resp \/ fenceallpair' req resp.
 
-Definition nth_such n S i := count_upto S i = n /\ S (trace_labels i).
 
 Lemma rd_rest_vis r (Rr: is_rd_resp r): vis' r = read2mem_read (trace_index r).
 Proof.
@@ -1449,6 +1706,15 @@ Proof.
   unfold vis'.
   destruct (excluded_middle_informative (is_cpu_wr e)); vauto.
   destruct (excluded_middle_informative (is_wr_resp e)); vauto.
+Qed.
+
+Lemma fpgar_vis e (R: is_rd_resp e): vis' e = read2mem_read (trace_index e). 
+Proof.
+  unfold vis'.
+  ex_des.
+  ex_des.
+  ex_des.
+  vauto.
 Qed.
 
 Lemma RESTR_EQUIV thread index lbl:
@@ -1479,7 +1745,7 @@ Definition G :=
      fenceallpair := ⦗EG ∩₁ is_fence_req_all⦘ ⨾ req_resp_pair ⨾ ⦗EG ∩₁ is_fence_resp_all⦘
   |}.
 
-Lemma WFG: Wf_fpga G.
+Lemma WFG_fpga: Wf_fpga G.
 Proof.
   destruct WF.
   split; ins.
@@ -1620,7 +1886,7 @@ Proof.
 Qed.
 
 
-Lemma vis_lt_init_helper_cpu x y (SB: sb G x y): vis_lt' x y \/ (Eninit x /\ Eninit y).
+Lemma vis_lt_init_helper x y (SB: sb G x y): vis_lt' x y \/ (Eninit x /\ Eninit y).
 Proof.
 unfold sb in SB. apply seq_eqv_lr in SB. destruct SB as [Ex [SBxy Ey]]. ins.  
 do 2 red in Ex. des.
@@ -1737,10 +2003,10 @@ Proof.
   } 
 Qed.
   
-Lemma cpu_vis_respects_sb_w: restr_rel (is_cpu ∩₁ is_w) (sb G) ⊆ vis_lt'.
+Lemma cpu_vis_respects_sb_notr: restr_rel (fun e => is_cpu e /\ ~is_r e) (sb G) ⊆ vis_lt'.
 Proof.
 unfold restr_rel. red. ins. destruct H as [SBxy [Wx Wy]].
-destruct (vis_lt_init_helper_cpu x y SBxy) as [|[E'x E'y]]; auto. 
+destruct (vis_lt_init_helper x y SBxy) as [|[E'x E'y]]; auto. 
 red. red. right. apply seq_eqv_lr. splits; auto.
 red in SBxy. apply seq_eqv_lr in SBxy. destruct SBxy as [_ [SBxy _]].
 forward eapply (proj1 tb_respects_sb x y) as H; [basic_solver| ].
@@ -1751,49 +2017,294 @@ unfold vis'.
 destruct (excluded_middle_informative _) as [X | X].
 {
   destruct (excluded_middle_informative _) as [Y | Y].
-  2: {
-    unfolder'.
-    unfold is_w in *.
-    desf.
-  }
-  unfold write2prop. destruct (excluded_middle_informative _).
-  2: {
-    unfold trace_labels in n. rewrite trace_index_simpl in n; vauto.
-  }
+  {
+    unfold write2prop. destruct (excluded_middle_informative _).
+    2: {
+      unfold trace_labels in n. rewrite trace_index_simpl in n; vauto.
+    }
+    destruct (excluded_middle_informative _).
+    2: {
+      unfold trace_labels in n. rewrite trace_index_simpl in n; vauto.
+    }
+      destruct (constructive_indefinite_description _ _) as [px Px].
+      destruct (constructive_indefinite_description _ _) as [py Py].
+      simpl in *. desc.
+      unfold trace_labels in *. rewrite !trace_index_simpl in *; auto.
+      assert (exists thread, same_thread (EventLab x) = in_cpu_thread thread /\ same_thread (EventLab y) = in_cpu_thread thread).
+      { pose proof (reg_write_structure _ c). desc. inv H. 
+        pose proof (reg_write_structure _ c0). desc. inv H0. 
+        red in TIDxy. simpl in TIDxy. inv TIDxy.
+        exists thread0. 
+        split; apply RESTR_EQUIV. }
+      desc. rewrite H, H0 in *. 
+      assert (count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index x) < count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index y)).
+      { subst. apply Nat.lt_le_trans with (m := count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index x + 1)).
+        2: { eapply count_upto_more. lia. }
+        rewrite Nat.add_1_r, count_upto_next.
+        rewrite check1; [lia|].
+        unfold trace_labels. rewrite trace_index_simpl; auto. red. split; auto.
+        rewrite <- H. unfold same_thread. generalize c. 
+        destruct x; unfolder'; intuition; vauto.
+      } 
+      apply lt_diff in H1. desc. rewrite W_P_CORR0, W_P_CORR in H1. 
+      destruct (NPeano.Nat.lt_ge_cases px py); auto. 
+      remember (count_upto_more py px (is_cpu_prop ∩₁ in_cpu_thread thread) H2); lia. }
+      destruct (excluded_middle_informative).
+      { unfolder'. unfold is_cpu in *. desf. }
+      destruct excluded_middle_informative.
+      { unfolder'. unfold is_cpu in *. desf. }
+  destruct (NPeano.Nat.lt_ge_cases (write2prop (trace_index x)) (trace_index y)) as [| LE]; auto.
+  exfalso.
+  forward eapply (@reg_write_structure (EventLab x)) as H. 
+  { vauto. }
+  desc. inversion H. clear H.  
+  destruct y; desf.
+  destruct e; desf.
+  assert (thread0 = thread); [|subst thread0]. 
+  { red in TIDxy. vauto. }
+  remember (ThreadEvent thread index0 Cpu_fence) as tlab. 
+  assert (NOmega.lt_nat_l (trace_index tlab) (trace_length tr)) as DOM. 
+  { contra GE. apply ge_default in GE.
+    unfold trace_labels in GE. rewrite trace_index_simpl in GE; auto. 
+    rewrite Heqtlab in GE. discriminate GE. }
+  set (st := states (trace_index tlab)).
+  forward eapply (TSi (trace_index tlab)) with (d := def_lbl) as TSi; eauto. 
+  rewrite trace_index_simpl in TSi; auto.
+  rewrite Heqtlab in TSi at 2. inversion TSi. subst. 
+  remember (ThreadEvent thread index0 Cpu_fence) as e_fence. 
+  remember (ThreadEvent thread index (Cpu_store loc val)) as e_w.
+  forward eapply (@buffer_size_cpu thread (trace_index e_fence)) as BUF_SIZE. 
+  { destruct (trace_length tr); auto. simpl in *. lia. }
+  simpl in BUF_SIZE. rewrite <- H0 in BUF_SIZE. simpl in BUF_SIZE.
+  rewrite NO_WB in BUF_SIZE. simpl in BUF_SIZE. rewrite Nat.add_0_r in BUF_SIZE.
+  remember (write2prop (trace_index e_w)) as vis_w. 
+  assert (count_upto (cpu_write' ∩₁ same_thread (trace_labels (trace_index e_w))) (trace_index e_w) =
+          count_upto (is_cpu_prop ∩₁ same_thread (trace_labels (trace_index e_w))) vis_w) as VIS_W.
+  { subst vis_w. unfold write2prop in *. destruct (excluded_middle_informative _).
+    2: { generalize n, X. rewrite trace_index_simpl' in *; auto. by unfolder'. }
+    destruct (constructive_indefinite_description _ _). desc. simpl in *.
+    lia. }
+  replace (same_thread (trace_labels (trace_index e_w))) with (in_cpu_thread thread) in VIS_W.
+  2: { rewrite trace_index_simpl'; auto. subst e_w. by rewrite RESTR_EQUIV. }
+  assert (count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index e_w) < count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index e_fence)) as MORE_WRITES.
+  { unfold lt. rewrite <- Nat.add_1_r.
+    rewrite <- (@check1 _ (cpu_write' ∩₁ in_cpu_thread thread) (trace_labels ((trace_index e_w)))).
+    2: { red. rewrite trace_index_simpl'; auto. by subst e_w. }
+    rewrite <- count_upto_next. apply count_upto_more. lia. }
+  assert (count_upto (is_cpu_prop ∩₁ in_cpu_thread thread) (trace_index e_fence) <= count_upto (is_cpu_prop ∩₁ in_cpu_thread thread) vis_w) as MORE_PROPS.
+  { apply count_upto_more. lia. }
+  lia. }
+  ex_des.
+  ex_des.
   destruct (excluded_middle_informative _).
-  2: {
-    unfold trace_labels in n. rewrite trace_index_simpl in n; vauto.
-  }
-    destruct (constructive_indefinite_description _ _) as [px Px].
-    destruct (constructive_indefinite_description _ _) as [py Py].
-    simpl in *. desc.
-    unfold trace_labels in *. rewrite !trace_index_simpl in *; auto.
-    assert (exists thread, same_thread (EventLab x) = in_cpu_thread thread /\ same_thread (EventLab y) = in_cpu_thread thread).
-    { pose proof (reg_write_structure _ c). desc. inv H. 
-      pose proof (reg_write_structure _ c0). desc. inv H0. 
-      red in TIDxy. simpl in TIDxy. inv TIDxy.
-      exists thread0. 
-      split; apply RESTR_EQUIV. }
-    desc. rewrite H, H0 in *. 
-    assert (count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index x) < count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index y)).
-    { subst. apply Nat.lt_le_trans with (m := count_upto (cpu_write' ∩₁ in_cpu_thread thread) (trace_index x + 1)).
-      2: { eapply count_upto_more. lia. }
-      rewrite Nat.add_1_r, count_upto_next.
-      rewrite check1; [lia|].
-      unfold trace_labels. rewrite trace_index_simpl; auto. red. split; auto.
-      rewrite <- H. unfold same_thread. generalize c. 
-      destruct x; unfolder'; intuition; vauto.
-    } 
-    apply lt_diff in H1. desc. rewrite W_P_CORR0, W_P_CORR in H1. 
-    destruct (NPeano.Nat.lt_ge_cases px py); auto. 
-    remember (count_upto_more py px (is_cpu_prop ∩₁ in_cpu_thread thread) H2); lia. }
-  destruct Wx.
-  unfold is_cpu, is_cpu_wr, is_w in *.
-  unfolder'.
-  desf.
+  { forward eapply (w2p_later (trace_index y)); [rewrite trace_index_simpl'; unfold write'; unfolder'; desf; intuition|].
+    lia. }
+  destruct (excluded_middle_informative).
+  { destruct Wy. unfold is_cpu, is_wr_resp in *; desf. }
+  destruct (excluded_middle_informative).
+  { destruct Wy. unfold is_cpu, is_rd_resp in *; desf. }
+  auto.
 Qed.
 
+Ltac same_chan_prover := ins; apply set_extensionality; unfold same_chan, in_chan; simpl; red; splits; red; ins; desc; vauto.
 
+Lemma fpga_all_fence_sb_respects_vis: (sb G ⨾ ⦗is_fence_resp_all⦘) ⊆ vis_lt'.
+Proof.
+  red; ins.
+  destruct H as [x0 [SBxy FN]].
+  destruct FN as [EQ FN].
+  subst x0.
+  destruct (vis_lt_init_helper x y SBxy) as [|[E'x E'y]]; auto. 
+  red. red. right. apply seq_eqv_lr. splits; auto.
+  red in SBxy. apply seq_eqv_lr in SBxy. destruct SBxy as [_ [SBxy _]].
+  forward eapply (proj1 tb_respects_sb x y) as H; [basic_solver| ].
+  apply seq_eqv_lr in H. destruct H as [_ [[TBxy TIDxy] _]]. 
+  red in TBxy.
+  assert (is_fpga y) as FPY. { unfolder'; desf. }
+  assert (is_fpga x) as FPX. { unfold same_tid in *. unfolder'; desf. }
+  cut (is_wr_resp x \/ ~is_wr_resp x).
+  2: { unfolder'; unfold is_fpga in *; desf; intuition. }
+  intro K; destruct K as [WRX | NWRX].
+  2: {
+    forward eapply (TI_LE_VIS y); vauto.
+    { unfolder'; desf. }
+    forward eapply (TI_GE_VIS x); vauto.
+    { unfolder'; desf. }
+    lia.
+  }
+  unfold vis'.
+  do 5 ex_des.
+  destruct (NPeano.Nat.lt_ge_cases (write2prop (trace_index x)) (trace_index y)) as [| LE]; auto.
+  exfalso.
+  forward eapply (@fpga_write_structure (EventLab x)) as H. 
+  { vauto. }
+  desc. inversion H. clear H.  
+  destruct y; desf.
+  destruct e; desf.
+    remember (FpgaEvent (Fpga_fence_resp_all) index0 m) as tlab.
+    rename chan into c.
+    assert (NOmega.lt_nat_l (trace_index tlab) (trace_length tr)) as DOM. 
+    { contra GE. apply ge_default in GE.
+      unfold trace_labels in GE. rewrite trace_index_simpl in GE; auto. 
+      rewrite Heqtlab in GE. discriminate GE. }
+    set (st := states (trace_index tlab)).
+    forward eapply (TSi (trace_index tlab)) with (d := def_lbl) as TSi; eauto. 
+    rewrite trace_index_simpl in TSi; auto.
+    rewrite Heqtlab in TSi at 2. inversion TSi. subst. 
+    remember (FpgaEvent (Fpga_fence_resp_all) index0 m) as e_fence. 
+    remember (FpgaEvent (Fpga_write_resp c loc val) index meta) as e_w.
+    forward eapply (@buffer_size_upstream_write c (trace_index e_fence)) as BUF_SIZE. 
+    { destruct (trace_length tr); auto. simpl in *. lia. }
+    simpl in BUF_SIZE. rewrite <- H0 in BUF_SIZE. simpl in BUF_SIZE.
+    rewrite NO_UPSTREAMS in BUF_SIZE. simpl in BUF_SIZE. rewrite Nat.add_0_r in BUF_SIZE.
+    remember (write2prop (trace_index e_w)) as vis_w.  
+    assert (count_upto (fpga_write' ∩₁ same_chan (trace_labels (trace_index e_w))) (trace_index e_w) =
+            count_upto (is_fpga_prop ∩₁ same_chan (trace_labels (trace_index e_w))) vis_w) as VIS_W.
+    { subst vis_w. unfold write2prop in *. destruct (excluded_middle_informative _).
+      { exfalso. clear LE. rewrite trace_index_simpl' in c0; auto.  }
+      destruct (excluded_middle_informative) as [FWX | NW].
+      2: { exfalso. clear LE. rewrite trace_index_simpl' in NW; auto.  }
+      destruct (constructive_indefinite_description _ _). desc. simpl in *.
+      lia. }
+    replace (same_chan (trace_labels (trace_index e_w))) with (in_chan c) in VIS_W.
+    2: { rewrite trace_index_simpl'; auto. subst e_w. same_chan_prover. }
+    assert (count_upto (fpga_write' ∩₁ in_chan c) (trace_index e_w) < count_upto (fpga_write' ∩₁ in_chan c) (trace_index e_fence)) as MORE_WRITES.
+    { unfold lt. rewrite <- Nat.add_1_r.
+      rewrite <- (@check1 _ (fpga_write' ∩₁ in_chan c) (trace_labels ((trace_index e_w)))).
+      2: { red. rewrite trace_index_simpl'; auto. by subst e_w. }
+      rewrite <- count_upto_next. apply count_upto_more. lia. }
+    assert (count_upto (is_fpga_prop ∩₁ in_chan c) (trace_index e_fence) <= count_upto (is_fpga_prop ∩₁ in_chan c) vis_w) as MORE_PROPS.
+    { apply count_upto_more. lia. }
+    lia.
+Qed.
+
+Lemma fpga_resp_vis_respects_sb_notr: restr_rel (fun e => is_fpga e /\ ~is_rd_resp e /\ is_resp e) (poch G) ⊆ vis_lt'.
+Proof.
+  unfold restr_rel. red. ins. destruct H as [POCHxy [Rx Ry]].
+  destruct POCHxy as [SBxy CHxy].
+  cut (is_fence_resp_all y \/ ~is_fence_resp_all y).
+  2: { unfolder'; desf; intuition. }
+  intro FN; destruct FN as [FNY | NFNY].
+  { forward eapply (fpga_all_fence_sb_respects_vis x y); vauto. }
+  destruct (vis_lt_init_helper x y SBxy) as [|[E'x E'y]]; auto. 
+  red. red. right. apply seq_eqv_lr. splits; auto.
+  red in SBxy. apply seq_eqv_lr in SBxy. destruct SBxy as [_ [SBxy _]].
+  forward eapply (proj1 tb_respects_sb x y) as H; [basic_solver| ].
+  apply seq_eqv_lr in H. destruct H as [_ [[TBxy TIDxy] _]]. 
+  red in CHxy.
+  (* apply tb_respects_sb in SBxy. destruct SBxy as [TBxy TIDxy].  *)
+  red in TBxy.
+  cut (is_wr_resp x \/ ~is_wr_resp x).
+  2: { unfolder'; destruct Rx; unfold is_fpga in *; desf; intuition. }
+  destruct Rx as [FX [NRX RSPX]].
+  destruct Ry as [Fy [NRY RSPY]].
+  intro K; destruct K as [WRX | NWRX].
+  2: {
+    forward eapply (TI_LE_VIS y); vauto.
+    forward eapply (TI_GE_VIS x); vauto.
+    { unfolder'. unfold is_w; desf. }
+    lia.
+  }
+  unfold vis'.
+  do 3 ex_des.
+  destruct excluded_middle_informative.
+  { unfold write2prop. destruct (excluded_middle_informative _).
+    { exfalso; rewrite trace_index_simpl' in c; vauto. }
+    destruct (excluded_middle_informative _).
+    2: { rewrite trace_index_simpl' in *; vauto. }
+    destruct (excluded_middle_informative _).
+    { exfalso; rewrite trace_index_simpl' in c; vauto. }
+    destruct (excluded_middle_informative (fpga_write' (trace_labels (trace_index y)))).
+    2: { rewrite trace_index_simpl' in *; vauto. }
+      destruct (constructive_indefinite_description _ _) as [px Px].
+      destruct (constructive_indefinite_description _ _) as [py Py].
+      simpl in *. desc.
+      unfold trace_labels in *. rewrite !trace_index_simpl in *; auto.
+      assert (exists ch, same_chan (EventLab x) = in_chan ch /\ same_chan (EventLab y) = in_chan ch).
+      { pose proof (fpga_write_structure _ f). desc. inv H. 
+        pose proof (fpga_write_structure _ f0). desc. inv H0.
+        assert (chan = chan0) by vauto. subst chan. 
+        red in TIDxy. simpl in TIDxy. inv TIDxy.
+        exists chan0. 
+        split; same_chan_prover. }
+      desc. rewrite H, H0 in *. 
+      assert (count_upto (fpga_write' ∩₁ in_chan ch) (trace_index x) < count_upto (fpga_write' ∩₁ in_chan ch) (trace_index y)).
+      { subst. apply Nat.lt_le_trans with (m := count_upto (fpga_write' ∩₁ in_chan ch) (trace_index x + 1)).
+        2: { eapply count_upto_more. lia. }
+        rewrite Nat.add_1_r, count_upto_next.
+        rewrite check1; [lia|].
+        unfold trace_labels. rewrite trace_index_simpl; auto. red. split; auto.
+        rewrite <- H. unfold same_chan. 
+        destruct x; unfolder'; intuition; vauto; unfolder'; desf.
+      } 
+      apply lt_diff in H1. desc. rewrite W_P_CORR0, W_P_CORR in H1. 
+      destruct (NPeano.Nat.lt_ge_cases px py); auto. 
+      remember (count_upto_more py px (is_fpga_prop ∩₁ in_chan ch) H2); lia. }
+  ex_des.
+  destruct (NPeano.Nat.lt_ge_cases (write2prop (trace_index x)) (trace_index y)) as [| LE]; auto.
+  exfalso.
+  forward eapply (@fpga_write_structure (EventLab x)) as H. 
+  { vauto. }
+  desc. inversion H. clear H.  
+  destruct y; desf.
+  destruct e; desf.
+  {
+    assert (c = chan); [|subst chan]. 
+    { vauto. }
+    remember (FpgaEvent (Fpga_fence_resp_one c) index0 m) as tlab.
+    (* remember (ThreadEvent thread index0 Cpu_fence) as tlab.  *)
+    assert (NOmega.lt_nat_l (trace_index tlab) (trace_length tr)) as DOM. 
+    { contra GE. apply ge_default in GE.
+      unfold trace_labels in GE. rewrite trace_index_simpl in GE; auto. 
+      rewrite Heqtlab in GE. discriminate GE. }
+    set (st := states (trace_index tlab)).
+    forward eapply (TSi (trace_index tlab)) with (d := def_lbl) as TSi; eauto. 
+    rewrite trace_index_simpl in TSi; auto.
+    rewrite Heqtlab in TSi at 2. inversion TSi. subst. 
+    remember (FpgaEvent (Fpga_fence_resp_one c) index0 m) as e_fence. 
+    remember (FpgaEvent (Fpga_write_resp c loc val) index meta) as e_w.
+    forward eapply (@buffer_size_upstream_write c (trace_index e_fence)) as BUF_SIZE. 
+    { destruct (trace_length tr); auto. simpl in *. lia. }
+    simpl in BUF_SIZE. rewrite <- H0 in BUF_SIZE. simpl in BUF_SIZE.
+    rewrite NO_UPSTREAM in BUF_SIZE. simpl in BUF_SIZE. rewrite Nat.add_0_r in BUF_SIZE.
+    remember (write2prop (trace_index e_w)) as vis_w.  
+    assert (count_upto (fpga_write' ∩₁ same_chan (trace_labels (trace_index e_w))) (trace_index e_w) =
+            count_upto (is_fpga_prop ∩₁ same_chan (trace_labels (trace_index e_w))) vis_w) as VIS_W.
+    { subst vis_w. unfold write2prop in *. destruct (excluded_middle_informative _).
+      { exfalso. clear LE. rewrite trace_index_simpl' in c0; auto.  }
+      destruct (excluded_middle_informative) as [FWX | NW].
+      2: { exfalso. clear LE. rewrite trace_index_simpl' in NW; auto.  }
+      destruct (constructive_indefinite_description _ _). desc. simpl in *.
+      lia. }
+    replace (same_chan (trace_labels (trace_index e_w))) with (in_chan c) in VIS_W.
+    2: { rewrite trace_index_simpl'; auto. subst e_w. same_chan_prover. }
+    assert (count_upto (fpga_write' ∩₁ in_chan c) (trace_index e_w) < count_upto (fpga_write' ∩₁ in_chan c) (trace_index e_fence)) as MORE_WRITES.
+    { unfold lt. rewrite <- Nat.add_1_r.
+      rewrite <- (@check1 _ (fpga_write' ∩₁ in_chan c) (trace_labels ((trace_index e_w)))).
+      2: { red. rewrite trace_index_simpl'; auto. by subst e_w. }
+      rewrite <- count_upto_next. apply count_upto_more. lia. }
+    assert (count_upto (is_fpga_prop ∩₁ in_chan c) (trace_index e_fence) <= count_upto (is_fpga_prop ∩₁ in_chan c) vis_w) as MORE_PROPS.
+    { apply count_upto_more. lia. }
+    lia. }
+Qed.
+
+Lemma cpu_w_not_r: (is_cpu ∩₁ is_w) ⊆₁ (fun e => is_cpu e /\ ~is_r e).
+Proof.
+  red. ins.
+  destruct H.
+  unfold is_cpu, is_w, is_r; desf; intuition.
+Qed.
+
+Lemma cpu_vis_respects_sb_w: restr_rel (is_cpu ∩₁ is_w) (sb G) ⊆ vis_lt'.
+Proof.
+  remember cpu_w_not_r as H.
+  assert (sb G ⊆ sb G) as H1 by basic_solver.
+  forward eapply (restr_rel_mori H H1).
+  ins.
+  rewrite (H0).
+  apply cpu_vis_respects_sb_notr.
+Qed.
+  
 
 Lemma rfe_diff_tid w r (RFE: rfe G w r): tid w <> tid r. 
 Proof.
@@ -1853,6 +2364,7 @@ Proof.
   apply sb_same_tid in SB; vauto.
   symmetry in SB; auto.
 Qed.
+
 
 (* Requires memory fairness to prove? *)
 Lemma fsupp_vis_loc: fsupp (restr_eq_rel loc vis_lt').
@@ -2030,6 +2542,54 @@ Proof.
   unfold same_chan, in_chan in *. desf.
 Qed. 
 
+Lemma mr2r_fpgar r ch (REG: fpga_mem_read' (trace_labels r))
+      (CH: chan_l (trace_labels r) = ch):
+  (fpga_read_resp' ∩₁ in_chan ch) (trace_nth (mem_read2read r) tr def_lbl).
+Proof.
+  unfold mem_read2read. destruct (excluded_middle_informative _).
+  2: { vauto. }
+  (* 2: { generalize REG, n. rewrite trace_index_simpl'; auto. intuition. } *)
+  destruct (constructive_indefinite_description _ _). desc. simpl in *.
+  fold (trace_labels x) in *.
+  apply fpga_memread_structure in f. desc. inversion f. subst. 
+  destruct THREAD_PROP as [CPU_PROP SAME_TID].
+  split; vauto.
+  simpl.
+  unfold same_chan, in_chan, chan_l in *. desf.
+Qed. 
+
+Lemma r2mr_fpga r ch (REG: fpga_read_resp' (trace_labels r))
+      (CH: chan_l (trace_labels r) = ch):
+  (fpga_mem_read' ∩₁ in_chan ch) (trace_nth (read2mem_read r) tr def_lbl).
+Proof.
+  unfold read2mem_read. destruct (excluded_middle_informative _).
+  2: { vauto. }
+  (* 2: { generalize REG, n. rewrite trace_index_simpl'; auto. intuition. } *)
+  destruct (constructive_indefinite_description _ _). desc. simpl in *.
+  fold (trace_labels x) in *.
+  apply fpga_read_structure in f. desc. inversion f. subst. 
+  destruct THREAD_PROP as [CPU_PROP SAME_TID].
+  split; vauto.
+  simpl.
+  unfold same_chan, in_chan, chan_l in *. desf.
+Qed. 
+
+Lemma ups2mr_fpgar r ch (REG: fpga_read_ups' (trace_labels r))
+      (CH: chan_l (trace_labels r) = ch):
+  (fpga_mem_read' ∩₁ in_chan ch) (trace_nth (read_ups2mem_read r) tr def_lbl).
+Proof.
+  unfold read_ups2mem_read. destruct (excluded_middle_informative _).
+  2: { vauto. }
+  (* 2: { generalize REG, n. rewrite trace_index_simpl'; auto. intuition. } *)
+  destruct (constructive_indefinite_description _ _). desc. simpl in *.
+  fold (trace_labels x) in *.
+  apply fpga_rflush_structure in f. desc. inversion f. subst. 
+  destruct R_PROP as [CPU_PROP SAME_TID].
+  split; vauto.
+  simpl.
+  unfold same_chan, in_chan, chan_l in *. desf.
+Qed. 
+
 Lemma ti_uniq i j thread ind lbl (EQ: trace_nth i tr def_lbl = trace_nth j tr def_lbl)
       (EVENT: trace_nth i tr def_lbl = EventLab (ThreadEvent thread ind lbl)):
   i = j.
@@ -2080,24 +2640,6 @@ Proof.
   apply lt_nondefault. unfold trace_labels. rewrite TRACE. vauto.
 Qed.
 
-Lemma nth_such_self (F: SyLabel -> Prop) i (Fi: F (trace_labels i)):
-  nth_such (count_upto F i) F i.
-Proof.
-  red. split; auto.
-Qed. 
-
-Lemma nth_such_unique k F i j (NTH_I: nth_such k F i) (NTH_J: nth_such k F j):
-  i = j.
-Proof.
-  red in NTH_I, NTH_J. desc. 
-  pose proof (Nat.lt_trichotomy i j) as LT. des; auto.
-  { exfalso. apply lt_diff in LT. desc. subst.
-    forward eapply (@count_upto_more (S i) (i + S d) F) as MORE; [lia| ].
-    rewrite count_upto_next, check1 in MORE; auto. lia. }
-  { exfalso. apply lt_diff in LT. desc. subst.
-    forward eapply (@count_upto_more (S j) (j + S d) F) as MORE; [lia| ].
-    rewrite count_upto_next, check1 in MORE; auto. lia. }  
-Qed. 
 
 Lemma buffer_sources_cpu i thread (DOM: NOmega.lt_nat_l i (trace_length tr)):
   let buf := cpu_bufs (states i) thread in
@@ -2421,15 +2963,252 @@ Proof.
       rewrite updo; vauto; lia. }
 Qed.
 
-Ltac same_chan_prover := ins; apply set_extensionality; unfold same_chan, in_chan; simpl; red; splits; red; ins; desc; vauto.
+Lemma buffer_sources_upstream_rd i chan (DOM: NOmega.lt_nat_l i (trace_length tr)):
+  let buf := filter is_read_ups (up_bufs (states i) chan) in
+  let ip := count_upto (fpga_mem_read' ∩₁ in_chan chan) i in
+  forall k l meta (AT_K: Some (read_up l, meta) = nth_error buf k),
+  exists mr, 
+    let lab_mr := FpgaReadToUpstream chan l meta in
+    ⟪ MREAD: trace_labels mr = lab_mr ⟫ /\
+    ⟪ WRITE_POS: nth_such (ip + k) (fpga_read_ups' ∩₁ in_chan chan) mr ⟫ /\
+    (* ⟪ WRITE_VALUE: trace_labels w =  ⟫ /\ *)
+    ⟪ WRITE_BEFORE: mr < i ⟫ /\
+    ⟪ PROP_AFTER: i <= read_ups2mem_read mr ⟫.
+Proof.
+  induction i.
+  { ins. rewrite <- TS0 in AT_K. simpl in AT_K. by destruct k. }
+  simpl in *. ins.
+  assert (NOmega.lt_nat_l i (trace_length tr)) as DOM'.
+  { destruct (trace_length tr); vauto. simpl in *. lia. }
+  specialize (IHi DOM').
+
+  assert (forall meta, Some (read_up l, meta) = nth_error (filter is_read_ups (up_bufs (states i) chan)) k ->
+          ~ (fpga_mem_read' ∩₁ in_chan chan) (trace_nth i tr def_lbl) ->
+          exists mr : nat,
+            trace_labels mr = (FpgaReadToUpstream chan l meta) /\
+            nth_such (count_upto (fpga_mem_read' ∩₁ in_chan chan) (S i) + k)
+                     (fpga_read_ups' ∩₁ in_chan chan)
+                     mr /\
+            mr < S i /\
+            S i <= read_ups2mem_read mr) as SAME.
+  { ins. specialize (IHi k l meta0). specialize_full IHi; [congruence| ].
+    desc. exists mr. splits; vauto.
+    { cut (count_upto (fpga_mem_read' ∩₁ in_chan chan) (S i) = count_upto (fpga_mem_read' ∩₁ in_chan chan) i); [congruence| ].
+      rewrite count_upto_next, check0; [lia| ]. auto. }
+    apply le_lt_or_eq in PROP_AFTER. des; [lia| ].
+    forward eapply (@ups2mr_fpgar mr chan) as UPS2MR_PROP; try (by vauto). 
+    { rewrite MREAD; vauto. }
+    rewrite MREAD; vauto. }
+    
+  forward eapply (TSi i) with (d := def_lbl) as TSi; auto.
+  inversion TSi.
+  all: try (apply SAME; [destruct H0, H2; simpl in *; congruence | ]; rewrite <- H; unfolder'; intuition; vauto ).
+  3: { rewrite <- H2 in AT_K. simpl in AT_K.
+    destruct (classic (channel = chan)).
+    2: { 
+         apply SAME. rewrite <- H0. simpl. rewrite AT_K. rewrite updo; vauto; lia.
+         rewrite <- H. unfolder'. unfold in_chan in *. intuition.  }
+    (* destruct (classic (meta0 = meta)).
+    2: { } *)
+    subst channel. 
+    rewrite upds in AT_K.
+    (* assert (k <= length (up_bufs chan)) as W_POS.
+    { forward eapply (proj1 (nth_error_Some  (up_bufs chan ++ (store_up loc val, meta0) :: nil) k)).
+      { apply opt_val. exists (store_up l v, meta). symmetry. auto. }
+      rewrite length_app. simpl. lia. } *)
+    assert (k <= length (filter is_read_ups (up_bufs chan))) as R_POS.
+    { forward eapply (proj1 (nth_error_Some (filter is_read_ups (up_bufs chan ++ (read_up loc, meta0) :: nil)) k)).
+      { apply opt_val. exists (read_up l, meta). vauto.  }
+      rewrite filter_app. rewrite length_app. simpl. lia. }
+    apply le_lt_or_eq in R_POS. des.
+    { apply SAME.
+      { rewrite filter_app in AT_K. rewrite nth_error_app1 in AT_K; auto. by rewrite <- H0. }
+      rewrite <- H. unfolder'. intuition. }
+    exists i.
+    assert (l = loc /\ meta = meta0).  
+    { rewrite R_POS in AT_K. rewrite filter_app in AT_K. rewrite nth_error_app2 in AT_K; [| lia].
+      rewrite Nat.sub_diag in AT_K. simpl in AT_K. by inversion AT_K. }
+    desc. subst loc meta.
+    (* forward eapply (ti_infer_fpga i) as IND; eauto.  *)
+    splits.
+    { fold (trace_labels i) in H. rewrite <- H. auto. }
+    { forward eapply (buffer_size_upstream_read chan (i)) as BUF_SIZE.
+      { destruct (trace_length tr); vauto. simpl in *. lia. }
+      simpl in BUF_SIZE. rewrite R_POS.
+      rewrite count_upto_next, check0.
+      2: { unfold trace_labels. rewrite <- H. unfolder'. intro. desf. }
+      rewrite Nat.add_0_r.
+      rewrite <- H0 in BUF_SIZE. simpl in BUF_SIZE. rewrite <- BUF_SIZE.
+      apply nth_such_self. fold (trace_labels i) in H. rewrite <- H. vauto. }
+    { lia. }
+    { forward eapply (r_up2mem_later_fpga i) as LATER; vauto.
+      fold (trace_labels i) in H. unfolder'; desf. } }
+  3: { destruct (classic (chan = channel)).
+    2: { apply SAME.
+         { rewrite <- H0. rewrite <- H2 in AT_K. simpl in AT_K. rewrite updo in AT_K; auto. }
+         rewrite <- H. unfolder'. unfold in_chan. unfold lbl_chan_opt. intuition. vauto. }
+    subst chan. rewrite <- H2 in AT_K. simpl in AT_K. rewrite upds in AT_K.
+    specialize (IHi (S k) l meta). specialize_full IHi. 
+    { rewrite <- H0. simpl. rewrite UPSTREAM. simpl. vauto. }
+    desc. exists mr.
+    splits; vauto.
+    { replace (count_upto (fpga_mem_read' ∩₁ in_chan channel) (S i)) with (count_upto (fpga_mem_read' ∩₁ in_chan channel) i + 1).
+      { by rewrite <- NPeano.Nat.add_assoc, Nat.add_1_l. }
+      rewrite count_upto_next, check1; auto.
+      unfold trace_labels. by rewrite <- H. }
+    apply le_lt_or_eq in PROP_AFTER. des; [done| ].
+
+    exfalso.
+    assert (fpga_read_ups' (trace_labels mr)) by (unfolder'; desf).
+    unfold read_ups2mem_read in PROP_AFTER. 
+    destruct (excluded_middle_informative _).
+    2: vauto.
+    destruct (constructive_indefinite_description _ _). desc. simpl in *.
+    (* rewrite trace_index_simpl' in *; auto. *)
+    assert (same_chan (trace_labels mr) = in_chan channel) as CH_REWR.
+    { rewrite MREAD. ins. apply set_extensionality. 
+      unfold same_chan, in_chan. simpl. red. splits; red; ins; desc; vauto. }
+    rewrite CH_REWR in *. subst x.
+    red in WRITE_POS. desc. lia. }
+    { apply SAME.
+      2: { rewrite <- H. intro. destruct H1; desf. }
+      cut (filter is_read_ups (TSOFPGA.up_bufs (states (S i)) chan) = filter is_read_ups (TSOFPGA.up_bufs (states i) chan)).
+      { ins. rewrite <- H1. vauto. }
+      rewrite <- H0, <- H2; simpl.
+      destruct (classic (channel = chan)).
+      { subst chan. rewrite upds. rewrite filter_app; simpl. apply app_nil_r. }
+      rewrite updo; vauto; lia. }
+    { apply SAME.
+      2: { rewrite <- H. intro. destruct H1; desf. }
+      cut (filter is_read_ups (TSOFPGA.up_bufs (states (S i)) chan) = filter is_read_ups (TSOFPGA.up_bufs (states i) chan)).
+      { ins. rewrite <- H1. vauto. }
+      rewrite <- H0, <- H2; simpl.
+      destruct (classic (channel = chan)).
+      { subst chan. rewrite UPSTREAM. rewrite upds. simpl. auto. }
+      rewrite updo; vauto; lia. }
+Qed.
+
+Lemma buffer_sources_downstream i chan (DOM: NOmega.lt_nat_l i (trace_length tr)):
+  let buf := down_bufs (states i) chan in
+  let ip := count_upto (fpga_read_resp' ∩₁ in_chan chan) i in
+  forall k l v meta (AT_K: Some (l, v, meta) = nth_error buf k),
+  exists mr, 
+    let lab_mr := FpgaMemRead chan l v meta in
+    ⟪ MREAD: trace_labels mr = lab_mr ⟫ /\
+    ⟪ WRITE_POS: nth_such (ip + k) (fpga_mem_read' ∩₁ in_chan chan) mr ⟫ /\
+    (* ⟪ WRITE_VALUE: trace_labels w =  ⟫ /\ *)
+    ⟪ WRITE_BEFORE: mr < i ⟫ /\
+    ⟪ PROP_AFTER: i <= mem_read2read mr ⟫
+    .
+Proof.
+  induction i.
+  { ins. rewrite <- TS0 in AT_K. simpl in AT_K. by destruct k. }
+  simpl in *. ins.
+  assert (NOmega.lt_nat_l i (trace_length tr)) as DOM'.
+  { destruct (trace_length tr); vauto. simpl in *. lia. }
+  specialize (IHi DOM').
+
+  assert (forall meta, Some (l, v, meta) = nth_error (down_bufs (states i) chan) k ->
+          ~ (fpga_read_resp' ∩₁ in_chan chan) (trace_nth i tr def_lbl) ->
+          exists mr : nat,
+            trace_labels mr = (FpgaMemRead chan l v meta) /\
+            nth_such (count_upto (fpga_read_resp' ∩₁ in_chan chan) (S i) + k)
+                     (fpga_mem_read' ∩₁ in_chan chan)
+                     mr /\
+            mr < S i /\
+            S i <= mem_read2read mr) as SAME.
+  { ins. specialize (IHi k l v meta0). specialize_full IHi; [congruence| ].
+    desc. exists mr. splits; vauto.
+    { cut (count_upto (fpga_read_resp' ∩₁ in_chan chan) (S i) = count_upto (fpga_read_resp' ∩₁ in_chan chan) i); [congruence| ].
+      rewrite count_upto_next, check0; [lia| ]. auto. }
+    apply le_lt_or_eq in PROP_AFTER. des; [lia| ].
+    forward eapply (@mr2r_fpgar mr chan) as MR2R_PROP; try (by vauto). 
+    { rewrite MREAD; vauto. }
+    rewrite MREAD; vauto. }
+    
+  forward eapply (TSi i) with (d := def_lbl) as TSi; auto.
+  inversion TSi.
+  all: try (apply SAME; [destruct H0, H2; simpl in *; congruence | ]; rewrite <- H; unfolder'; intuition; vauto ).
+  { rewrite <- H2 in AT_K. simpl in AT_K.
+    destruct (classic (channel = chan)).
+    2: { 
+         apply SAME. rewrite <- H0. simpl. rewrite AT_K. rewrite updo; vauto; lia.
+         rewrite <- H. unfolder'. unfold in_chan in *. intuition.  }
+    (* destruct (classic (meta0 = meta)).
+    2: { } *)
+    subst channel. 
+    rewrite upds in AT_K.
+    (* assert (k <= length (up_bufs chan)) as W_POS.
+    { forward eapply (proj1 (nth_error_Some  (up_bufs chan ++ (store_up loc val, meta0) :: nil) k)).
+      { apply opt_val. exists (store_up l v, meta). symmetry. auto. }
+      rewrite length_app. simpl. lia. } *)
+    assert (k <= length (down_bufs chan)) as R_POS.
+    { forward eapply (proj1 (nth_error_Some (down_bufs chan ++ (loc, val, meta0) :: nil) k)).
+      { apply opt_val. exists (l, v, meta). auto.  }
+      rewrite length_app. simpl. lia. }
+    apply le_lt_or_eq in R_POS. des.
+    { apply SAME.
+      { rewrite nth_error_app1 in AT_K; auto. by rewrite <- H0. }
+      rewrite <- H. unfolder'. intuition. }
+    exists i.
+    assert (l = loc /\ v = val /\ meta = meta0).  
+    { rewrite R_POS in AT_K. rewrite nth_error_app2 in AT_K; [| lia].
+      rewrite Nat.sub_diag in AT_K. simpl in AT_K. by inversion AT_K. }
+    desc. subst loc val meta.
+    (* forward eapply (ti_infer_fpga i) as IND; eauto.  *)
+    splits.
+    { fold (trace_labels i) in H. rewrite <- H. rewrite H3. auto. }
+    { forward eapply (buffer_size_downstream chan (i)) as BUF_SIZE.
+      { destruct (trace_length tr); vauto. simpl in *. lia. }
+      simpl in BUF_SIZE. rewrite R_POS.
+      rewrite count_upto_next, check0.
+      2: { unfold trace_labels. rewrite <- H. unfolder'. intro. desf. }
+      rewrite Nat.add_0_r.
+      rewrite <- H0 in BUF_SIZE. simpl in BUF_SIZE. rewrite BUF_SIZE.
+      apply nth_such_self. fold (trace_labels i) in H. rewrite <- H. vauto. }
+    { lia. }
+    { forward eapply (mr2r_later_fpga i) as LATER; vauto.
+      fold (trace_labels i) in H. unfolder'; desf. } }
+  { destruct (classic (chan = channel)).
+    2: { apply SAME.
+         { rewrite <- H0. rewrite <- H2 in AT_K. simpl in AT_K. rewrite updo in AT_K; auto. }
+         rewrite <- H. unfolder'. unfold in_chan. unfold lbl_chan_opt. intuition. vauto. }
+    subst chan. rewrite <- H2 in AT_K. simpl in AT_K. rewrite upds in AT_K.
+    specialize (IHi (S k) l v meta). specialize_full IHi. 
+    { rewrite <- H0. simpl. by rewrite DOWNSTREAM. }
+    desc. exists mr.
+    splits; vauto.
+    { replace (count_upto (fpga_read_resp' ∩₁ in_chan channel) (S i)) with (count_upto (fpga_read_resp' ∩₁ in_chan channel) i + 1).
+      { by rewrite <- NPeano.Nat.add_assoc, Nat.add_1_l. }
+      rewrite count_upto_next, check1; auto.
+      unfold trace_labels. by rewrite <- H. }
+    apply le_lt_or_eq in PROP_AFTER. des; [done| ].
+
+    exfalso.
+    assert (fpga_mem_read' (trace_labels mr)) by (unfolder'; desf).
+    unfold mem_read2read in PROP_AFTER. 
+    destruct (excluded_middle_informative _).
+    2: vauto.
+    destruct (constructive_indefinite_description _ _). desc. simpl in *.
+    (* rewrite trace_index_simpl' in *; auto. *)
+    assert (same_chan (trace_labels mr) = in_chan channel) as CH_REWR.
+    { rewrite MREAD. ins. apply set_extensionality. 
+      unfold same_chan, in_chan. simpl. red. splits; red; ins; desc; vauto. }
+    rewrite CH_REWR in *. subst x.
+    red in WRITE_POS. desc. lia. }
+Qed.
+
+
 
 (* write_req -> (попало в pre-stage) -> resp (попало в upstream) -> prop (из upstream в память) *)
 (* если write_req, то exists i: write_resp (trace_labels i) /\ loc_req = loc_resp /\ meta_req = meta_resp *)
 
 (* req_req (pre_stege), meta -> to_upstream, meta -> read_mem (to_downstream), meta -> read_resp, meta *)
 
-Lemma w2p_preserves_meta w (DOM: NOmega.lt_nat_l w (trace_length tr)) (W: fpga_write' (trace_labels w)):
-  meta_l w = meta_l (write2prop w).
+Lemma w2p_preserves_info w (DOM: NOmega.lt_nat_l w (trace_length tr)) (W: fpga_write' (trace_labels w)):
+  meta_l (trace_labels w) = meta_l (trace_labels (write2prop w)) /\
+  loc_l (trace_labels w) = loc_l (trace_labels (write2prop w)) /\
+  val_l (trace_labels w) = val_l (trace_labels (write2prop w)).
 Proof.
   unfold write2prop.
   ex_des.
@@ -2438,32 +3217,79 @@ Proof.
   simpl.
   desf.
   unfold meta_l.
-  destruct (excluded_middle_informative); vauto.
-  destruct excluded_middle_informative; vauto.
-
   destruct THREAD_PROP.
-  remember (TSi x l0 def_lbl) as STEP.
+  remember (TSi x P_DOM def_lbl) as STEP.
   inversion STEP; fold (trace_labels x) in *.
   all: try by (exfalso; unfolder'; desf).
-  forward eapply (buffer_sources_upstream_wr x channel l0 0); eauto.
+  forward eapply (buffer_sources_upstream_wr x channel P_DOM 0); eauto.
   { rewrite <- H2. simpl. rewrite UPSTREAM. simpl. eauto. }
   ins.
   desf.
-  assert (same_chan (trace_labels w) = in_chan channel) as CH_R. { rewrite <- H3 in H0; destruct (trace_labels w); desf. destruct e; desf. destruct e; desf. unfold same_chan in *. same_chan_prover. }
+  (* destruct e; desf.
+  destruct  *)
+  assert (same_chan (EventLab e) = in_chan c) as CH_R. { desf. destruct e; desf. destruct e; desf. unfold same_chan in *. same_chan_prover. }
   rewrite CH_R in W_P_CORR.
   rewrite Nat.add_0_r in WRITE_POS.
   rewrite <- W_P_CORR in WRITE_POS.
-  assert (nth_such (count_upto (fpga_write' ∩₁ in_chan channel) w) (fpga_write' ∩₁ in_chan channel) w).
+  assert (nth_such (count_upto (fpga_write' ∩₁ in_chan c) w) (fpga_write' ∩₁ in_chan c) w).
   { apply nth_such_self. destruct (trace_labels w); desf. do 2 (destruct e; desf). rewrite <- CH_R. split; vauto.  }
-  assert (w = trace_index (FpgaEvent (Fpga_write_resp channel loc val) ind meta)) by (eapply nth_such_unique; eauto).
-  subst w.
-  unfold meta_l_helper.
-  rewrite (trace_index_simpl').
-  2: vauto.
-  rewrite <- H3.
+  assert (w = trace_index (FpgaEvent (Fpga_write_resp c l v) ind m)) by (eapply nth_such_unique; eauto).
+  rewrite H3 in Heq.
+  rewrite trace_index_simpl' in Heq; vauto.
+Qed.
+
+Lemma mr2r_preserves_info mr (DOM: NOmega.lt_nat_l mr (trace_length tr)) (MR: fpga_mem_read' (trace_labels mr)):
+  meta_l (trace_labels mr) = meta_l (trace_labels (mem_read2read mr)) /\
+  loc_l (trace_labels mr) = loc_l (trace_labels (mem_read2read mr)) /\
+  val_l (trace_labels mr) = val_l (trace_labels (mem_read2read mr)).
+Proof.
+  unfold mem_read2read.
+  ex_des.
+  destruct (constructive_indefinite_description).
   simpl.
-  rewrite UPSTREAM. 
-  simpl; vauto.
+  desf.
+  unfold meta_l.
+  destruct THREAD_PROP.
+  remember (TSi x P_DOM def_lbl) as STEP.
+  inversion STEP; fold (trace_labels x) in *.
+  all: try by (exfalso; unfolder'; desf).
+  forward eapply (buffer_sources_downstream x channel P_DOM 0); eauto.
+  { rewrite <- H2. simpl. rewrite DOWNSTREAM. simpl. eauto. }
+  ins.
+  desf.
+  assert (same_chan (FpgaMemRead c l v m) = in_chan c) as CH_R. { same_chan_prover. }
+  rewrite CH_R in RS_MR_CORR.
+  assert (c = channel) as CH_EQ. { unfold same_chan, in_chan in *; desf. }
+  subst channel.
+  rewrite Nat.add_0_r in WRITE_POS.
+  rewrite <- RS_MR_CORR in WRITE_POS.
+  assert (nth_such (count_upto (fpga_mem_read' ∩₁ in_chan c) mr) (fpga_mem_read' ∩₁ in_chan c) mr).
+  { apply nth_such_self. destruct (trace_labels mr); desf. }
+  assert (mr = mr0) by (eapply nth_such_unique; eauto).
+  rewrite <- Heq.
+  simpl.
+  assert (loc = loc_l (trace_labels mr0)) as LOC0 by (unfold loc_l; desf).
+  assert (val = val_l (trace_labels mr0)) as VAL0 by (unfold val_l; desf).
+  assert (meta = meta_l (trace_labels mr0)) as META0 by (unfold meta_l; desf).
+  rewrite LOC0, VAL0, META0.
+  rewrite H3.
+  unfold meta_l; desf.
+Qed.
+
+Lemma read2mem_read_preserves_info r (DOM: NOmega.lt_nat_l r (trace_length tr)) (MR: fpga_read_resp' (trace_labels r)):
+  meta_l (trace_labels r) = meta_l (trace_labels (read2mem_read r)) /\
+  loc_l (trace_labels r) = loc_l (trace_labels (read2mem_read r)) /\
+  val_l (trace_labels r) = val_l (trace_labels (read2mem_read r)).
+Proof.
+  assert (fpga_mem_read' (trace_labels (read2mem_read r))) as MR'. { eapply r2mr_fpga; eauto. }
+  forward eapply (mr2r_preserves_info (read2mem_read r)) as PRES; eauto.
+  { unfold read2mem_read. ex_des. destruct constructive_indefinite_description. ins. desf. }
+  assert (mem_read2read (read2mem_read r) = r) as R_SELF. { eapply read2mem2read; eauto. }
+  destruct PRES as [MEQ [LEQ VEQ]].
+  splits.
+  - rewrite MEQ; rewrite R_SELF; auto.
+  - rewrite LEQ; rewrite R_SELF; auto.
+  - rewrite VEQ; rewrite R_SELF; auto.
 Qed.
 
 
@@ -3149,7 +3975,7 @@ Proof.
   desc. 
   unfold trace_before at 1 in TB_LATEST.
   red in TB_LATEST. desc.
-  pose proof (r_vis r Rr) as VISr. 
+  pose proof (r_vis_cpu r Rr) as VISr. 
   unfold latest_of_by. splits; auto.
   remember (states (trace_index r)) as st. destruct st as [mem bufs]. simpl in *.
   assert (filter (fun loc_val : Loc * Val => fst loc_val =? loc r) (cpu_bufs (exact_tid r)) <> nil) as BUF_NEMPTY. 
@@ -3207,7 +4033,7 @@ Proof.
       { do 2 red in RF1. des.
         { red in RF1. desc. by left. }
         right. apply seq_eqv_lr in RF1. desc.
-        by rewrite (r_vis r) in RF4. }
+        by rewrite (r_vis_cpu r) in RF4. }
       ins. desc.
       (* des. *)
       destruct (classic (is_init y)). 
@@ -3219,7 +4045,7 @@ Proof.
       
       apply RF0. splits; vauto. do 2 red. des; vauto. 
       right. apply seq_eqv_lr. splits; vauto.
-      by rewrite (r_vis r). }
+      by rewrite (r_vis_cpu r). }
     
     inversion TSi; vauto.
     { rewrite <- Heqst in H0. inversion H0. subst.
@@ -3247,45 +4073,33 @@ Proof.
 
       cut (sh_mem (loc r) = valw w). 
       (* TODO: can be generalized to reason about fpga read source *)
-      { ins.            
+      { ins.
+        forward eapply (read2mem_read_preserves_info (trace_index r)); vauto.
+        { rewrite trace_index_simpl'; vauto. }
+        ins.
+        destruct H0 as [META_EQ [LOC_EQ VAL_EQ]].
         rewrite <- H.
         (* prove that a read gets whatever is in memory during it's mem visit 
            read_req -> MemoryRead at read2mem_read with same loc and same meta ->
            -> whatever is in this loc goes back to downstream with same loc and meta
            -> if downstreamRead (l, v, m) enters downstream, then
          *)
-        unfold read2mem_read in TSi, Heqst.
+        unfold read2mem_read in *.
         destruct (excluded_middle_informative (fpga_read_resp' (trace_labels (trace_index r)))).
         2: { rewrite trace_index_simpl' in n0; vauto. }
         destruct (constructive_indefinite_description); simpl in *.
+        rewrite trace_index_simpl' in *; vauto.
         desf.
         destruct THREAD_PROP as [MEM_READ SAME_CH].
         unfold trace_labels in MEM_READ.
         rewrite <- Heqst in TSi.
         inversion TSi; vauto.
         all: try by (unfold fpga_mem_read' in MEM_READ; desf).
-        (* Уже есть: read_resp, read_resp -> mem_read (в прошлом).
-           Хотим: рассуждать про пары (read_req, read_resp)
-           read_req -> read_to_upstream -> mem_read
-           mem_read (to downstream) <-> read_resp
-
-
-           
-           rf (write, read_resp)
-        *)
-        assert (SyEvents.loc r = loc). { admit. }
-        rewrite H0.     
-        admit.
+        fold (trace_labels x) in H7.
+        rewrite <- H7 in *.
+        unfolder'; unfold SyEvents.loc, val_l, loc_l, meta_l in *.
+        desf.
       } 
-      (* { ins.            
-        inversion TSi; vauto.
-        (* { rewrite <- Heqst in H1. inversion H1. subst.
-          unfold SyEvents.loc in BUF_FLT. simpl in BUF_FLT.        
-          inversion CPU_BUF; vauto. simpl in LATEST_BUF.  
-          by rewrite BUF_FLT in LATEST_BUF. } *)
-        { rewrite <- Heqst in H1. inversion H1. subst.
-          unfold SyEvents.loc in H. simpl in H.
-          simpl. admit.  } } *)
       
       forward eapply (@latest_mem_value_kept (read2mem_read (trace_index r)) w (loc r)); vauto.
       { red. desf. destruct RF as [[LOC [VIS [EGW IS_W]]] LATEST]. splits; vauto.
@@ -3313,7 +4127,7 @@ Qed.
 
 (* Well formed *)
 
-Lemma G_well_formed: Wf G.
+Lemma WFG: Wf G.
 Proof.
   split.
   pose proof WF as WF'.
@@ -3348,7 +4162,7 @@ Proof.
     unfold rf'. red. ins. desf.
     3: { unfold latest_of_by in H. by desc. }
     all: destruct (state_before_event y); destruct (filter _ _); unfold latest_of_by in H; by desc. }
-  { admit. }
+  { eapply rf_same_value. }
   { unfold functional. intros r w1 w2 RF1 RF2. unfold transp in *.
     forward eapply (@read_source r) as [w' [RF' UNIQ]]. 
     1, 2: generalize RF1; simpl; basic_solver.
@@ -3368,26 +4182,543 @@ Proof.
     do 2 red in H1. des.
     { apply (proj1 Eninit_non_init y). red in H1. by desc. }
     apply seq_eqv_lr in H1. desc. by apply (proj1 Eninit_non_init y). }
-  (* { ins. do 2 red in ACT. des.
-    { by destruct e. }
-    specialize (NO_TID0 e ACT). destruct e; vauto. } *)
-  Admitted.
+Qed.
 
 
 
-(* \\Well formed *)
-
-
-Lemma Ax86ConsistentG: Ax86Consistent G.
+Lemma empty_inter_minus_same {A: Type} (X Y: A -> Prop):
+  X ∩₁ Y ≡₁ ∅ <-> X \₁ Y ≡₁ X.
 Proof.
-  Admitted.
+  split.
+  { ins. red. split; [basic_solver| ].
+    red. ins.
+    red in H. desc.
+    red. split; auto.
+    red in H. specialize (H x).
+    red. ins. apply H. basic_solver. }
+  { intros. rewrite <- H. basic_solver. }
+Qed.
+
+Lemma co_implies_vis_lt: co G ⊆ vis_lt'.
+Proof. simpl. basic_solver. Qed.
+
+Lemma fr_implies_vis_lt: fr G ⊆ vis_lt'.
+Proof.
+  red. intros r w FR. red. right.
+  apply (wf_frD WFG), seq_eqv_lr in FR. destruct FR as [Rr [FR Ww]].
+  apply (fr_ninit WFG), seq_eqv_r in FR. destruct FR as [FR [Ew NINITw]].
+  apply (wf_frE WFG), seq_eqv_lr in FR. destruct FR as [Er [FR _]].
+  simpl in *. unfold EG, set_union in *. des; vauto.
+  { edestruct (init_non_r); eauto. } 
+  apply seq_eqv_lr. splits; auto.
+  cut (is_cpu_rd r \/ is_rd_resp r).
+  2: { unfolder'; desf; try by (left; vauto); try by (right; vauto). right; auto. right; auto. }
+  intro RTYPE.
+  destruct RTYPE as [CPU_R | RD_RESP].
+
+  { erewrite r_vis_cpu; eauto.
+    pose proof (Nat.lt_trichotomy (trace_index r) (vis' w)). des; auto.
+    { exfalso. unfold vis' in H.
+      (* assert (trace_index r = write2prop (trace_index)) *)
+      destruct (excluded_middle_informative _) as [W|W].
+      {
+      (* 2: { admit. apply ti_inj in H; vauto. apply (fr_irr WFG FR). } *)
+      unfold write2prop in H. destruct (excluded_middle_informative _) as [W_|W_].
+      2: { rewrite trace_index_simpl' in W_; unfolder'; desf. }
+      (* 2: { unfold trace_labels in W_. rewrite trace_index_simpl in W_; auto. } *)
+      destruct (constructive_indefinite_description _ _) as [p Pp]. simpl in *. desc.
+      rewrite <- H in THREAD_PROP.
+      unfold trace_labels at 2 in THREAD_PROP. rewrite trace_index_simpl in THREAD_PROP; auto.
+      red in THREAD_PROP. desc. vauto. } 
+      {
+      (* 2: { admit. apply ti_inj in H; vauto. apply (fr_irr WFG FR). } *)
+      destruct (excluded_middle_informative _) as [W_|W_].
+      2: { unfolder'; desf. }
+      (* forward eapply (fpga_write_structure (EventLab w)); vauto; ins.
+      desf. *)
+      unfold write2prop in H.
+      ex_des. { clear H. rewrite (trace_index_simpl') in c; vauto. }
+      ex_des. 2: { clear H. rewrite (trace_index_simpl') in *; vauto. }
+      destruct constructive_indefinite_description; simpl in *; desc.
+      (* TODO: по лемме расписать нормально что такое w2p, а не фигней страдать. *)
+      (* 2: { unfold trace_labels in W_. rewrite trace_index_simpl in W_; auto. } *)
+      rewrite <- H in THREAD_PROP.
+      unfold trace_labels at 2 in THREAD_PROP. rewrite trace_index_simpl in THREAD_PROP; auto.
+      red in THREAD_PROP. desc. vauto. } 
+      }
+    exfalso. red in FR. destruct FR as [[w' [RF CO]] NEQ]. unfold transp in RF.
+    pose proof (rf_before_prop _ _ RF) as RF_PROP. 
+    simpl in RF. apply seq_eqv_lr in RF. desc. red in RF0.  
+    destruct (state_before_event r) as [wp rp ups downs mem bufs].
+    destruct (excluded_middle_informative (is_cpu_rd r)); vauto.
+    (* pose proof (proj1 (wf_rfE WFG) _ _ RF). apply seq_eqv_lr in H0. destruct H0 as [Ew' [_ _]].  *)
+    
+    (* destruct (bufs (exact_tid r)). *)
+    destruct (filter (fun loc_val : Loc * Val => fst loc_val =? loc r) (bufs (exact_tid r))) eqn:BUF_FLT. 
+    { desc. red in RF0. desc.
+      specialize (RF2 w). specialize_full RF2.
+      { splits; vauto.
+        { apply (wf_col WFG) in CO. red in CO. congruence.  }
+        red. right. apply seq_eqv_lr. splits; auto. by rewrite (r_vis_cpu r CPU_R). }
+      (* vauto.  *)
+      (* apply (RF2 w). exists w. *)
+      red in RF2. des.
+      { subst w'. by apply (co_irr WFG w). }
+      simpl in CO. apply seq_eqv_lr in CO. destruct CO as [Ww' [[VISw'w LOCw'w] _]].
+      forward eapply (strict_partial_order_antisymmetric vis_SPO w w') as EQ; auto.
+      subst w'. cdes vis_SPO. eapply vis_SPO0; eauto. }
+    desc.
+    simpl in CO. apply seq_eqv_lr in CO. destruct CO as [Ww' [[VISw'w LOCw'w] _]].
+    do 2 red in VISw'w. des.
+    { red in VISw'w. desc. red in RF0. desc.
+      destruct (proj1 Eninit_non_init w'). vauto. }
+    apply inclusion_seq_eqv_l, inclusion_seq_eqv_r in VISw'w.
+    red in RF0. desc.
+    specialize_full RF_PROP; vauto.
+    lia. } 
+    pose proof (Nat.lt_trichotomy (vis' r) (vis' w)). des; auto.
+    { exfalso. erewrite fpgar_vis in H; vauto. 
+      unfold vis' in H.
+      (* assert (trace_index r = write2prop (trace_index)) *)
+      destruct (excluded_middle_informative _) as [W|W].
+      {
+      (* 2: { admit. apply ti_inj in H; vauto. apply (fr_irr WFG FR). } *)
+      unfold write2prop in H. destruct (excluded_middle_informative _) as [W_|W_].
+      2: { rewrite trace_index_simpl' in W_; unfolder'; desf. }
+      (* 2: { unfold trace_labels in W_. rewrite trace_index_simpl in W_; auto. } *)
+      destruct (constructive_indefinite_description _ _) as [p Pp]. simpl in *. desc.
+      rewrite <- H in THREAD_PROP.
+      unfold read2mem_read in *.
+      ex_des. 2: { clear H. rewrite (trace_index_simpl') in *; vauto. }
+      destruct constructive_indefinite_description; simpl in *; desc.
+      destruct THREAD_PROP, THREAD_PROP0; unfolder'; desf. }
+      {
+      (* 2: { admit. apply ti_inj in H; vauto. apply (fr_irr WFG FR). } *)
+      destruct (excluded_middle_informative _) as [W_|W_].
+      2: { unfolder'; desf. }
+      (* forward eapply (fpga_write_structure (EventLab w)); vauto; ins.
+      desf. *)
+      unfold write2prop in H.
+      ex_des. { clear H. rewrite (trace_index_simpl') in c; vauto. }
+      ex_des. 2: { clear H. rewrite (trace_index_simpl') in *; vauto. }
+      destruct constructive_indefinite_description; simpl in *; desc.
+      rewrite <- H in THREAD_PROP.
+      unfold read2mem_read in *.
+      ex_des. 2: { clear H. rewrite (trace_index_simpl') in *; vauto. }
+      destruct constructive_indefinite_description; simpl in *; desc.
+      destruct THREAD_PROP, THREAD_PROP0; unfolder'; desf. }
+      }
+    exfalso. red in FR. destruct FR as [[w' [RF CO]] NEQ]. unfold transp in RF.
+    (* pose proof (rf_before_prop _ _ RF) as RF_PROP.  *)
+    simpl in RF. apply seq_eqv_lr in RF. desc. red in RF0.  
+    destruct (state_before_event r) as [wp rp ups downs mem bufs].
+    destruct (excluded_middle_informative (is_cpu_rd r)); [unfolder'; desf|].
+    (* pose proof (proj1 (wf_rfE WFG) _ _ RF). apply seq_eqv_lr in H0. destruct H0 as [Ew' [_ _]].  *)
+    
+    (* destruct (bufs (exact_tid r)). *)
+    (* destruct (filter (fun loc_val : Loc * Val => fst loc_val =? loc r) (bufs (exact_tid r))) eqn:BUF_FLT.  *)
+    { desc. red in RF0. desc.
+      specialize (RF2 w). specialize_full RF2.
+      { splits; vauto.
+        { apply (wf_col WFG) in CO. red in CO. congruence.  }
+        red. right. apply seq_eqv_lr. splits; auto. }
+      (* vauto.  *)
+      (* apply (RF2 w). exists w. *)
+      red in RF2. des.
+      { subst w'. by apply (co_irr WFG w). }
+      simpl in CO. apply seq_eqv_lr in CO. destruct CO as [Ww' [[VISw'w LOCw'w] _]].
+      forward eapply (strict_partial_order_antisymmetric vis_SPO w w') as EQ; auto.
+      subst w'. cdes vis_SPO. eapply vis_SPO0; eauto. } 
+Qed.
+
+Lemma rfe_implies_vis_lt: rfe G ⊆ vis_lt'.
+Proof.
+  unfold rfe.
+  red. intros w r [RFwr NSBwr].
+  forward eapply (rfe_diff_tid w r). { basic_solver. }
+  intro DIFF_TID.
+  simpl in RFwr. apply seq_eqv_lr in RFwr. destruct RFwr as [Ww [RFwr Rr]]. 
+  red in Ww, Rr. desc. 
+  red in RFwr.
+  destruct (excluded_middle_informative (is_cpu_rd r)).
+  {
+    remember (state_before_event r) as st. destruct st as [wp rp ups downs mem bufs].   
+    destruct (filter (fun loc_val : Loc * Val => fst loc_val =? loc r) (bufs (exact_tid r))) eqn:BUF_FLT;
+      [red in RFwr; by desc| ].
+    desc. red in RFwr. desc.
+    exfalso; apply DIFF_TID.
+    unfold exact_tid, tid in *; destruct w, r; desf.
+  }
+    remember (state_before_event r) as st. destruct st as [wp rp ups downs mem bufs].   
+    (* destruct (filter (fun loc_val : Loc * Val => fst loc_val =? loc r) (bufs (exact_tid r))) eqn:BUF_FLT;
+      [red in RFwr; by desc| ]. *)
+    desc. red in RFwr. desc.
+    vauto.
+Qed.
+
+Lemma ppoFpga_not_cpu: (ppoFpga G ∩ (is_cpu × is_cpu)) ≡ ∅₂.
+Proof.
+  split.
+  { intro; ins.
+    do 2 destruct H.
+    - repeat destruct H0, H; unfold is_cpu, is_resp, is_rd_resp in *; repeat destruct H; destruct x; desf.
+    - destruct H0 as [CPUX CPUY]; destruct H as [[[H | H] | H] | H]; simpl in H; apply seq_eqv_lr in H; destruct H as [H1 [H2 H3]]; destruct H1, H3; unfold is_cpu, is_resp, is_rd_resp, is_rd_req in *; destruct x; desf.
+  }
+  intro.
+  vauto.
+Qed.
+
+Lemma nonw_vis e (NW: ~ is_w e) (CPU: is_cpu e): vis' e = trace_index e.
+Proof.
+  unfold vis'.
+  destruct (excluded_middle_informative (is_cpu_wr e)).
+  - exfalso. apply NW. red in i. unfold is_w. desf.
+  - unfolder'. unfold is_w, is_cpu in *. desf. 
+Qed.
+
+Lemma ninit_vis_helper x y (E'x : Eninit x) (E'y : Eninit y) (VIS: vis_lt' x y):
+  vis' x < vis' y.
+Proof. 
+  do 2 red in VIS. des; vauto.
+  { exfalso. red in VIS. desc. by apply (proj1 Eninit_non_init x). }
+  apply seq_eqv_lr in VIS. by desc.
+Qed. 
+
+Lemma vis_respects_ppo_cpu: (ppoCpu G) ⊆ vis_lt'. 
+Proof.
+  red. ins. red in H.
+  destruct H as [H CPU].
+  red in H.
+  destruct H as [SB NWR].
+  destruct (vis_lt_init_helper x y SB) as [| [E'x E'y]]; auto. 
+  red. right. apply seq_eqv_lr. splits; auto.
+  unfold cross_rel in NWR. apply not_and_or in NWR.
+  red in SB. apply seq_eqv_lr in SB. destruct SB as [_ [SBxy _]]. 
+  des.
+  { destruct CPU. rewrite nonw_vis; vauto.
+    pose proof (TI_LE_VIS y E'y).
+    forward eapply (proj1 tb_respects_sb x y) as H_; [basic_solver| ].
+    apply seq_eqv_lr in H_. destruct H_ as [_ [[TB TID] _]].
+    red in TB.
+    assert (~is_rd_resp y) by (unfold is_cpu, is_rd_resp in *; desf).
+    remember (H1 H2); lia. }
+    cut (is_w x \/ ~is_w x).
+    2: { destruct CPU. unfold is_cpu, is_w in *. destruct x; desf; destruct e; intuition. }
+    destruct CPU as [CPU_X CPU_Y].
+    intro H; destruct H as [Wx | NWx].
+  (* assert (is_w y) as Wy.
+  { destruct CPU. destruct y; vauto. destruct e; vauto. desf. } *)
+  (* destruct (is_w x) eqn:X. *)
+  2: { replace (vis' x) with (trace_index x).
+       { pose proof (TI_LE_VIS y E'y).
+         assert (~is_rd_resp y) by (unfold is_cpu, is_rd_resp in *; desf).
+         forward eapply (proj1 tb_respects_sb x y) as H_; [basic_solver| ].
+         apply seq_eqv_lr in H_. destruct H_ as [_ [[TB TID] _]].
+         red in TB. remember (H H0). lia. }
+       rewrite nonw_vis; vauto. }
+  cut (is_w y \/ is_cpu_fence y).
+  2: { unfold is_w, is_cpu, is_cpu_fence in *; destruct x; desf; intuition. }
+  ins.
+  destruct H as [Wy | Fy].
+  { forward eapply (@cpu_vis_respects_sb_w x y) as VIS. 
+    { red. splits; vauto. red. apply seq_eqv_lr. splits; vauto. }
+    by apply ninit_vis_helper. }
+  { forward eapply (@cpu_vis_respects_sb_notr x y) as VIS. 
+    { red. splits; vauto. red. apply seq_eqv_lr. splits; vauto.
+     unfold is_r, is_w in *; desf. }
+    by apply ninit_vis_helper. }
+Qed.
+
+(* Lemma vis_respects_ppoFpga: (ppoFpga G) ⊆ vis_lt'.
+Proof.
+  red. ins. red in H.
+  destruct H as [[FF | PF] | PAIR].
+  2: {
+    apply seq_eqv_lr in PF.
+    destruct PF as [R [SBxy NR]].
+    red in NR.
+    destruct NR as [ACT_Y NR].
+    red. right. apply seq_eqv_lr. 
+    red in SBxy.
+    apply seq_eqv_lr in SBxy.
+    destruct SBxy as [ACT_X [SBxy _]].
+    assert (Eninit x). { destruct ACT_X; vauto; unfolder'; desf. }
+    assert (Eninit y). { destruct ACT_Y; vauto. red in SBxy. destruct x, y; unfolder'; desf. }
+    splits; vauto.
+    Search (vis' _).
+    forward eapply (TI_LE_VIS y); vauto.
+    forward eapply (r_vis x); vauto.
+    { unfolder'. unfold is_r; desf. }
+    ins.
+    remember (proj1 tb_respects_sb) as SB_TB.
+    red in SB_TB.
+    forward eapply (SB_TB x y).
+    { basic_solver. }
+    intro TB.
+    apply seq_eqv_lr in TB.
+    destruct TB as [_ [[TB TID] _]].
+    red in TB.
+    lia.
+  }
+  { apply seq_eqv_lr in FF.
+    destruct FF as [RSP [POCHxy NR]].
+    red in NR.
+    destruct NR as [ACT_Y NR].
+    Search vis_lt'.
+    cut (is_rd_resp x \/ ~is_rd_resp x); [|unfolder'; desf; intuition ].
+    red in POCHxy.
+    destruct POCHxy as [SBxy SAMECH].
+    destruct SAMECH as [FPGAX [FPGAY CHEQ]].
+    intro R; destruct R as [RDX | NRDX].
+    2: { 
+      cut (is_resp y \/ ~is_resp y); [|unfolder'; desf; intuition ].
+      intro R; destruct R as [RSPY | NRSPY].
+      { remember fpga_resp_vis_respects_sb_notr as SUB.
+      red in SUB.
+      eapply (SUB x y).
+      red. splits; vauto. }
+      assert (Eninit y). { destruct ACT_Y; vauto. red in SBxy. destruct x, y; unfolder'; desf. }
+      forward eapply (TI_LE_VIS y); vauto.
+      forward eapply (TI_GE_VIS x); vauto.
+      Print acyclic_union1.
+      Print acyclic_union.
+      Search (acyclic).
+     }
+    red. right. apply seq_eqv_lr. 
+    red in SBxy.
+    2: { unfolder'. unfold is_resp in *. destruct x; desf; intuition. }
+    apply seq_eqv_lr in SBxy.
+    destruct SBxy as [ACT_X [SBxy _]].
+  }
+Qed. *)
+
+Lemma vislt_closed: vis_lt'⁺ ≡ vis_lt'.
+Proof.
+  split.
+  red.
+  ins.
+  induction H; vauto.
+  remember vis_SPO as SPO.
+  red in SPO.
+  destruct SPO.
+  basic_solver.
+  red.
+  ins.
+  induction H; vauto.
+Qed.
+
+Lemma fence_fpga_respects_vislt: fenceFpga G ⊆ vis_lt'.
+Proof.
+  unfold fenceFpga.
+  unfold fenceFpga.
+  red; ins.
+  destruct H as[x0 [[EQX WRX] [x' [POFN [y' [SB [EQY MINUS]]]]]]].
+  subst x0.
+  subst y'.
+    assert (vis_lt' x' y) as VIS2. {
+      destruct (vis_lt_init_helper x' y SB); vauto.
+      destruct H as [ENX ENY].
+      red. red. right.
+      apply seq_eqv_lr; splits; vauto.
+      forward eapply (TI_GE_VIS x'); vauto.
+      { destruct POFN as [F | F]; destruct F as [x0 [H [EQ H']]]; subst x0; unfolder'; desf. }
+      destruct MINUS.
+      forward eapply (TI_LE_VIS y); vauto.
+      ins.
+      cut (trace_index x' < trace_index y); [lia|].
+      red in SB.
+      apply seq_eqv_lr in SB; desf.
+      remember ((proj1 tb_respects_sb)) as SB_TB.
+      forward eapply (SB_TB x' y); [apply seq_eqv_lr; splits; vauto|].
+      intro TB; apply seq_eqv_lr in TB; desf.
+      destruct TB0.
+      vauto.
+    }
+  destruct POFN as [F_ONE | F_ALL].
+  { assert (is_fence_resp_one x') as MID_FENCE. { destruct F_ONE. destruct H. destruct H0. subst x0; vauto. }
+    assert (vis_lt' x x'). {
+      destruct F_ONE as [x0 [POCH [XEQ F_ONE]]].
+      subst x0.
+      eapply (fpga_resp_vis_respects_sb_notr x x').
+      red. splits; vauto; unfolder'; desf.
+    }
+    destruct (vis_SPO).
+    basic_solver.
+   }   
+  { assert (is_fence_resp_all x') as MID_FENCE. { destruct F_ALL. destruct H. destruct H0. subst x0; vauto. }
+    assert (vis_lt' x x'). {
+      eapply (fpga_all_fence_sb_respects_vis x x'); vauto.
+    }
+    destruct (vis_SPO).
+    basic_solver.
+   }   
+Qed.
+
+Lemma fence_cpu_respect_vislt: fenceCpu G ⊆ vis_lt'.
+Proof.
+  red; ins.
+  red in H.
+  destruct H as [x0 [SB [x' [[EQ FENCE] SB']]]].
+  subst x0.
+  cut (vis_lt' x x' /\ vis_lt' x' y).
+  { destruct (vis_SPO); basic_solver. }
+  splits.
+  {
+    destruct (vis_lt_init_helper x x' SB); vauto.
+    destruct H as [ENX ENY].
+    assert (~is_init x) as NINX. { intro. forward eapply (proj1 Eninit_non_init x); vauto. }
+    assert (~is_init x') as NINY. { intro. forward eapply (proj1 Eninit_non_init x'); vauto. }
+    cut (is_r x \/ ~is_r x); [|unfolder'; desf; intuition].
+    intro H; destruct H as [R | NR].
+    2: { apply (cpu_vis_respects_sb_notr x x'); red in ENX; red; splits; vauto; apply seq_eqv_lr in SB; desf; red in SB0; unfolder'; desf. }
+      red. red. right.
+      apply seq_eqv_lr; splits; vauto.
+      forward eapply (TI_GE_VIS x); vauto.
+      { unfolder'; desf. }
+      forward eapply (TI_LE_VIS x'); vauto.
+      { unfolder'; desf. }
+      ins.
+      cut (trace_index x < trace_index x'); [lia|].
+      red in SB.
+      apply seq_eqv_lr in SB; desf.
+      remember ((proj1 tb_respects_sb)) as SB_TB.
+      forward eapply (SB_TB x x'); [apply seq_eqv_lr; splits; vauto|].
+      intro TB; apply seq_eqv_lr in TB; desf.
+      destruct TB0.
+      vauto.   
+  }
+    destruct (vis_lt_init_helper x' y SB'); vauto.
+    destruct H as [ENX ENY].
+    assert (~is_init x') as NINX. { intro. forward eapply (proj1 Eninit_non_init x'); vauto. }
+    assert (~is_init y) as NINY. { intro. forward eapply (proj1 Eninit_non_init y); vauto. }
+      forward eapply (sb_same_tid x' y); vauto.
+      ins.
+      red. red. right.
+      apply seq_eqv_lr; splits; vauto.
+      forward eapply (TI_GE_VIS x'); vauto.
+      { unfolder'; desf. }
+      forward eapply (TI_LE_VIS y); vauto.
+      { unfolder'; desf. }
+      ins.
+      cut (trace_index x' < trace_index y); [lia|].
+      red in SB.
+      apply seq_eqv_lr in SB'; desf.
+      remember ((proj1 tb_respects_sb)) as SB_TB.
+      forward eapply (SB_TB x' y); [apply seq_eqv_lr; splits; vauto|].
+      intro TB; apply seq_eqv_lr in TB; desf.
+      destruct TB0.
+      vauto.   
+Qed.
+
+Lemma fence_respects_vislt: fence G ⊆ vis_lt'.
+Proof.
+  unfold fence.
+  red; ins.
+  destruct H.
+  - apply fence_cpu_respect_vislt; vauto.
+  - apply fence_fpga_respects_vislt; vauto.
+Qed.
+
+
+Lemma read_after_write': irreflexive (fr G ⨾ poch G ⨾ readpair G).
+Search (_ ;; _ ⊆ _).
+  destruct (vis_SPO) as [IRR TRANS].
+  assert (fr G ⨾ poch G ⨾ readpair G ⊆ vis_lt').
+  { apply inclusion_seq_trans; vauto.
+    { apply fr_implies_vis_lt. }
+    red.
+    ins.
+    destruct H as [x0 [POCH [x' [[EQ REQ] [y' [PAIR [EQ' RESP]]]]]]].
+    subst x0; subst y'.
+    assert (vis_lt' x x').
+    { destruct REQ. forward eapply (fpga_resp_vis_respects_sb_notr x x'); vauto.
+      red; ins; split; vauto. unfolder'; unfold is_fpga; desf; intuition.
+     }
+    destruct H as [e1 [FR [e2 [POCH [e2' [[EQ RREQ] [e2_resp [RR_PAIR [EQ' RRES]]]]]]]]].
+    subst e2_resp.
+    subst e2'.
+  }
+  
+Proof.
+  
+Admitted.
+
+Lemma SCPL: acyclic ((poloc G ∪ rf G ∪ co G ∪ fr G) ∩ (is_cpu × is_cpu)).
+Proof.
+    assert (rfe G ∪ coe G ∪ fre G ⊆ vis_lt') as EXT_ORDER.
+    { arewrite (coe G ⊆ co G). arewrite (fre G ⊆ fr G). 
+      rewrite rfe_implies_vis_lt, co_implies_vis_lt, fr_implies_vis_lt.
+      by rewrite !unionK. }
+    assert (acyclic (TSO_hb G)) as TSO_HB_ACYC.  
+    { red. unfold TSO_hb. rewrite ct_of_ct. 
+      assert ((ppo G ∪ rfe G ∪ co G ∪ fr G) ≡ (rfe G ∪ co G ∪ fr G ∪ ppo G)) as REW by basic_solver.
+      rewrite REW.
+      rewrite inter_union_l.
+      rewrite vis_respects_ppo_cpu, rfe_implies_vis_lt, co_implies_vis_lt, fr_implies_vis_lt. rewrite !unionK.
+      cdes vis_SPO. apply trans_irr_acyclic; auto; basic_solver. }
+    red. red.
+    do 2 rewrite unionA with (r1 := restr_eq_rel _ _ ).
+    rewrite rel_helper. rewrite <- unionA, unionK.
+    apply acyclic_union1.
+    { rewrite inclusion_restr_eq. apply sb_acyclic. }
+    { apply inclusion_acyclic with (r' := TSO_hb G); auto.
+      unfold TSO_hb. rewrite <- ct_step. 
+      rewrite coi_union_coe, fri_union_fre. basic_solver. }
+    rewrite ct_of_trans.
+    2: { apply restr_eq_trans, sb_trans. }
+    arewrite (restr_eq_rel loc (sb G) ⊆ ppo G ∪ (⦗is_w⦘ ⨾ restr_eq_rel loc (sb G) ⨾ ⦗is_r⦘)).
+    { rewrite sb_ppo_ext at 1. rewrite restr_eq_union.
+      apply union_mori; basic_solver. }
+    rewrite seq_union_l. 
+    rewrite vis_respects_ppo. rewrite EXT_ORDER at 1. 
+    rewrite ct_begin with (r := (rfe G ∪ coe G ∪ fre G)). rewrite EXT_ORDER at 2.
+    arewrite (is_r ≡₁ (is_r ∩₁ is_rmw) ∪₁ (is_r \₁ is_rmw)).
+    { rewrite set_minusE. rewrite <- set_inter_union_r.
+      rewrite <- set_compl_minus, set_minusK. basic_solver. }
+    arewrite (is_r ∩₁ is_rmw ⊆₁ is_rmw) by basic_solver. 
+    rewrite id_union. case_union _ _. do 2 rewrite seq_union_r. 
+    arewrite (restr_eq_rel loc (sb G) ⨾ ⦗fun a : Event => is_rmw a⦘ ⊆ vis_lt).
+    { rewrite inclusion_restr_eq. eapply inclusion_trans. 
+      2: { eapply vis_respects_impliedfence. }
+      vauto. }
+    rewrite EXT_ORDER at 1. rewrite <- ct_begin. rewrite inclusion_seq_eqv_l at 1.
+    rewrite <- unionA, unionK.  
+    
+    arewrite (⦗is_r \₁ is_rmw⦘ ⨾ (rfe G ∪ coe G ∪ fre G) ⊆ fre G).
+    { rewrite (wf_rfeD WFG), (wf_coeD WFG).
+      rewrite <- seq_union_r. case_union _ _ .
+      seq_rewrite <- id_inter.
+      arewrite ((is_r \₁ is_rmw) ∩₁ is_w ≡₁ ∅); [| basic_solver]. 
+      red. split; [| basic_solver]. red. ins. do 2 (red in H; desc).
+      destruct x; vauto; destruct l; vauto. }
+    sin_rewrite w_sbloc_fr_implies_co. rewrite co_implies_vis_lt.
+    rewrite <- seq_union_r. rewrite inclusion_t_rt, unionK. rewrite <- ct_begin.
+    unfold acyclic. rewrite ct_of_ct. fold (acyclic vis_lt).
+    cdes vis_SPO. apply trans_irr_acyclic; auto. }
+
+(* Lemma G_Consistent: Ax86Consistent G.
+Proof.
+  split.
+} *)
 
 Lemma TSO_op_implies_decl:
   (fun e => trace_elems tr (EventLab e)) ≡₁ acts G \₁ is_init /\ 
-  Wf_fpga G /\
+  Wf_fpga G /\ Wf G /\ mem_fair G /\
   Ax86Consistent G.
 Proof.
-  Admitted.
+  splits.
+  { simpl. unfold EG.
+    rewrite set_minus_union_l, set_minusK, set_union_empty_l.
+    unfold Eninit. eapply set_equiv_rel_Transitive; [apply set_equiv_refl| ].
+    symmetry. apply empty_inter_minus_same. rewrite set_interC. apply Eninit_non_init. }
+  { apply WFG_fpga. }
+  { apply WFG. }
+  { red. apply fsupp_union_iff.
+    apply fsupp_mon with (r' := restr_eq_rel loc vis_lt'); [| apply fsupp_vis_loc].
+    rewrite restr_eq_rel_same_loc. apply inclusion_union_l.
+    { apply inclusion_inter_r; [apply co_implies_vis_lt | apply (wf_col WFG)]. }
+    { apply inclusion_inter_r; [apply fr_implies_vis_lt | apply (wf_frl WFG)]. }
+  }
 
 
 End SyLemmas.

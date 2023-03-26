@@ -3,6 +3,8 @@ Require Import SyEvents.
 From hahn Require Import Hahn.
 Require Import Lia.
 
+Set Implicit Arguments.
+
 Section SyExecution.
 
 
@@ -67,7 +69,7 @@ Notation "'Cpu'" := is_cpu.
 Notation "'Fpga'" := is_fpga.
 
 
-Definition same_ch := fun a b => chan a = chan b.
+Definition same_ch := fun a b => (Fpga a) /\ (Fpga b) /\ chan a = chan b.
 Definition same_loc := fun a b => loc a = loc b.
 Definition same_meta := fun a b => meta a = meta b.
 
@@ -123,7 +125,7 @@ Definition rfe' := rf \ same_tid.
 
 Definition sb := ⦗E⦘ ⨾ ext_sb ⨾ ⦗E⦘.
 
-Definition poloc := co ∩ same_loc.
+Definition poloc := sb ∩ same_loc.
 Definition poch := sb ∩ same_ch.
 Definition fr := rf⁻¹ ⨾ co \ ⦗fun _ => True⦘.
 Definition fr' := (⦗R⦘ ⨾ same_loc ⨾ ⦗W⦘) \ (rf⁻¹ ⨾ (co⁻¹)^*).
@@ -195,13 +197,13 @@ Definition poFnRsp := (poch ⨾ ⦗FnRspOne⦘) ∪ (sb ⨾ ⦗FnRspAll⦘).
 Definition fenceFpga := ⦗WrRsp⦘ ⨾ poFnRsp ⨾ sb ⨾ ⦗E \ RdRsp⦘.
 Definition fence := fenceCpu ∪ fenceFpga.
 
-Definition ppoCpu := sb \ (W × R) ∩ (Cpu × Cpu).
+Definition ppoCpu := (sb \ (W × R)) ∩ (Cpu × Cpu).
 Definition ppoFpga := (⦗Rsp⦘ ⨾ poch ⨾ ⦗E \ RdRsp⦘) ∪ (⦗RdRsp⦘ ⨾ sb ⨾ ⦗E \ RdRsp⦘) ∪ allpair.
 Definition ppo := ppoCpu ∪ ppoFpga.
 
 (* add sb asyclic? *)
 Record Ax86Consistent := {
-    sc_per_loc: acyclic ((poloc ∪ rf ∪ fr ∪ co) ∩ (Cpu × Cpu));
+    sc_per_loc: acyclic ((poloc ∪ rf ∪ co ∪ fr) ∩ (Cpu × Cpu));
     propagation: acyclic (ppo ∪ fence ∪ rfe ∪ fre ∪ co);
     read_after_write: irreflexive (fr ⨾ poch ⨾ readpair);
     read_after_fence: irreflexive (fr ⨾ poFnRsp ⨾ sb ⨾ readpair);

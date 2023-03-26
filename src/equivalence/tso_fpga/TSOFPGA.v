@@ -35,9 +35,9 @@ Inductive UpstreamEntry :=
 Inductive SyLabel := 
   | EventLab (e: Event)
   | CpuFlush (thread: nat)
-  | FpgaMemRead (c: Chan)
-  | FpgaMemFlush (c: Chan)
-  | FpgaReadToUpstream (c: Chan).
+  | FpgaMemRead (c: Chan) (l: Loc) (v: Val) (m: Mdata)
+  | FpgaMemFlush (c: Chan) (l: Loc) (v: Val) (m: Mdata)
+  | FpgaReadToUpstream (c: Chan) (l: Loc) (m: Mdata).
 
 
 Definition RPool := list (Chan * Loc * Mdata).
@@ -101,7 +101,7 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
 | fpga_mem_write w_pool r_pool up_bufs up_buf' down_bufs sh_mem cpu_bufs loc val channel meta
       (UPSTREAM: up_bufs channel = cons ((store_up loc val), meta) up_buf'):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
-                 (FpgaMemFlush channel)
+                 (FpgaMemFlush channel loc val meta)
                  (mkState w_pool r_pool (upd up_bufs channel up_buf') down_bufs (upd sh_mem loc val) cpu_bufs)
 | fpga_fence_resp_one channel meta w_pool w_pool' r_pool up_bufs down_bufs sh_mem cpu_bufs index
       (NO_UPSTREAM: up_bufs channel = nil)
@@ -118,13 +118,13 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
 | fpga_flush_read w_pool r_pool head tail up_bufs down_bufs sh_mem cpu_bufs loc channel meta
       (READ_POOL: r_pool = head ++ cons (channel, loc, meta) tail):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
-                 (FpgaReadToUpstream channel)
+                 (FpgaReadToUpstream channel loc meta)
                  (mkState w_pool (head ++ tail) (upd up_bufs channel (up_bufs channel ++ cons(read_up loc, meta) nil)) down_bufs sh_mem cpu_bufs)
 | fpga_mem_read w_pool r_pool up_bufs up_buf' down_bufs sh_mem cpu_bufs loc val channel meta
       (UPSTREAM: up_bufs channel = cons ((read_up loc), meta) up_buf')
       (SH_MEM: sh_mem loc = val):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
-                 (FpgaMemRead channel)
+                 (FpgaMemRead channel loc val meta)
                  (mkState w_pool r_pool (upd up_bufs channel up_buf') (upd down_bufs channel (down_bufs channel ++ cons (loc, val, meta) nil)) sh_mem cpu_bufs)
 | fpga_read_resp w_pool r_pool up_bufs down_bufs down_buf' sh_mem cpu_bufs loc val channel meta index
       (DOWNSTREAM: down_bufs channel = cons (loc, val, meta) down_buf'):
@@ -227,6 +227,14 @@ Definition FPGA_trace_pair_unique_wf (t: trace SyLabel) :=
 
 Definition def_lbl: SyLabel := EventLab (InitEvent 0). 
 
+Definition FPGA_trace_read_req_wf (t: trace SyLabel) :=
+  forall lbl i chan loc meta d
+    (TR_I: trace_nth i t d = lbl)
+    (IS_REQ: lbl = EventLab (FpgaEvent (Fpga_read_req chan loc) i meta)),
+  exists j lbl2, i < j /\ (NOmega.lt_nat_l j (trace_length t)) /\
+    trace_nth j t def_lbl = lbl2 /\ 
+    lbl2 = FpgaReadToUpstream chan loc meta.
+
 (* TODO: < instead of <=? *)
 (* TODO: remember FpgaEvent fpgaE1 index1 meta 1 *)
 Definition FPGA_trace_pair_exists_wf (t: trace SyLabel) := 
@@ -244,6 +252,8 @@ Record TSOFPGA_trace_wf (t: trace SyLabel) :=
     PAIR_UNIQUE : FPGA_trace_pair_unique_wf t; 
     PAIR_EXISTS : FPGA_trace_pair_exists_wf t
   }.    
+
+Definition TSO_hb G := ((ppo G ∪ rfe G ∪ co G ∪ fr G) ∩ (is_cpu × is_cpu))^+. 
 
 (* Record pairs_wf := {
   PAIR_UNIQ : meta_pair_unique;
@@ -284,9 +294,9 @@ Definition proj_ev (lbl: SyLabel) :=
 Definition lbl_thread (lbl: SyLabel) :=
   match lbl with
   | EventLab e => tid e
-  | FpgaMemFlush c => FpgaTid
-  | FpgaMemRead c => FpgaTid
-  | FpgaReadToUpstream c => FpgaTid
+  | FpgaMemFlush _ _ _ _ => FpgaTid
+  | FpgaMemRead _ _ _ _ => FpgaTid
+  | FpgaReadToUpstream _ _ _ => FpgaTid
   | CpuFlush thread => CpuTid thread
   end.
 
@@ -298,9 +308,9 @@ Definition lbl_chan_opt (lbl: SyLabel) :=
   | EventLab (FpgaEvent (Fpga_read_resp c _ _) _ _) => Some c
   | EventLab (FpgaEvent (Fpga_fence_req_one c) _ _) => Some c
   | EventLab (FpgaEvent (Fpga_fence_resp_one c) _ _) => Some c
-  | FpgaMemFlush c => Some c
-  | FpgaMemRead c => Some c
-  | FpgaReadToUpstream c => Some c
+  | FpgaMemFlush c _ _ _ => Some c
+  | FpgaMemRead c _ _ _ => Some c
+  | FpgaReadToUpstream c _ _ => Some c
   (* | EventLab (FpgaEvent (Fpga_fence_req_all) _ _) => Some 0
   | EventLab (FpgaEvent (Fpga_fence_resp_all) _ _) => Some 0 *)
   | _ => None
@@ -313,9 +323,9 @@ Definition in_chan chan := fun lbl => lbl_chan_opt lbl = Some chan.
 Definition is_fpga_lab (lbl: SyLabel) :=
   match lbl with
   | EventLab (FpgaEvent _ _ _) => True
-  | FpgaMemFlush _ => True
-  | FpgaMemRead _ => True
-  | FpgaReadToUpstream _ => True
+  | FpgaMemFlush _ _ _ _ => True
+  | FpgaMemRead _ _ _ _ => True
+  | FpgaReadToUpstream _ _ _ => True
   | _ => False
   end.
 
@@ -325,12 +335,12 @@ Definition is_cpu_prop (lbl: SyLabel) := match lbl with
   end.
 
 Definition is_fpga_prop (lbl: SyLabel) := match lbl with
-  | FpgaMemFlush _ => True
+  | FpgaMemFlush _ _ _ _ => True
   | _ => False
   end.
 
 Definition is_fpga_memread (lbl: SyLabel) := match lbl with
-  | FpgaMemRead _ => True
+  | FpgaMemRead _ _ _ _ => True
   | _ => False
   end.
 
@@ -361,27 +371,56 @@ Definition fpga_read_req' (lbl: SyLabel) := match lbl with
   | _ => False
 end.
 
+
 Definition fpga_write_req' (lbl: SyLabel) := match lbl with
   | EventLab (FpgaEvent (Fpga_write_req _ _ _) _ _) => True
   | _ => False
 end.
 
 Definition fpga_mem_read' (lbl: SyLabel) := match lbl with
-  | FpgaMemRead _ => True
+  | FpgaMemRead _ _ _ _=> True
   | _ => False
 end.
 
-Definition fpga_read_flush (lbl: SyLabel) := match lbl with
-  | FpgaReadToUpstream _ => True
+Definition fpga_read_ups' (lbl: SyLabel) := match lbl with
+  | FpgaReadToUpstream _ _ _ => True
   | _ => False
 end.
 
-(* Definition meta_l (lbl: SyLabel) :=
-  match lbl with
-  | EventLab (FpgaEvent _ m _) => m
+Definition meta_l (lbl: SyLabel) := match lbl with
+  | EventLab e => meta e
+  | FpgaMemFlush _ _ _ m => m
+  | FpgaMemRead _ _ _ m => m
+  | FpgaReadToUpstream _ _ m => m
+  | CpuFlush _ => 0
+  end.
+
+Definition loc_l (lbl: SyLabel) := match lbl with
+  | EventLab e => loc e
+  | FpgaMemFlush _ l _ _ => l
+  | FpgaMemRead _ l _ _ => l
+  | FpgaReadToUpstream _ l _ => l
+  | CpuFlush _ => 0
+  end.
+
+Definition val_l (lbl: SyLabel) := match lbl with
+  | EventLab (ThreadEvent _ _ (Cpu_store _ v)) => v
+  | EventLab (ThreadEvent _ _ (Cpu_load _ v)) => v
+  | EventLab (FpgaEvent (Fpga_write_resp _ _ v) _ _) => v
+  | EventLab (FpgaEvent (Fpga_read_resp _ _ v) _ _) => v
+  | EventLab (FpgaEvent (Fpga_write_req _ _ v) _ _) => v
+  | FpgaMemFlush _ _ v _ => v
+  | FpgaMemRead _ _ v _ => v
   | _ => 0
-  end. *)
+  end.
 
+Definition chan_l (lbl: SyLabel) := match lbl with
+  | EventLab e => chan e
+  | FpgaMemFlush c _ _ _ => c
+  | FpgaMemRead c _ _ _ => c
+  | FpgaReadToUpstream c _ _ => c
+  | _ => 0
+  end.
 
 Definition write' := cpu_write' ∪₁ fpga_write'.
 
@@ -397,7 +436,7 @@ Definition TSO_fair tr st :=
 
 End TSOFPGA.
 
-Ltac unfolder' := unfold set_compl, cross_rel, write', cpu_write', cpu_read', fpga_write', fpga_read_req', fpga_write_req', fpga_read_resp', fpga_mem_read', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
+Ltac unfolder' := unfold set_compl, cross_rel, write', cpu_write', cpu_read', fpga_write', fpga_read_ups', fpga_read_req', fpga_write_req', fpga_read_resp', fpga_mem_read', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_r, is_w, is_resp, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
 
 Section TSOFPGA_Facts.
 
@@ -457,11 +496,19 @@ Proof.
 Qed.
 
 Lemma fpga_memread_structure tlab (R: fpga_mem_read' tlab):
-  exists chan, tlab = FpgaMemRead chan.
+  exists chan loc val meta, tlab = FpgaMemRead chan loc val meta.
 Proof.
   unfolder'.
-  destruct tlab eqn:WW; vauto.
+  destruct tlab eqn:WW; vauto; eauto.
 Qed.
+
+Lemma fpga_rflush_structure tlab (R: fpga_read_ups' tlab):
+  exists chan loc meta, tlab = FpgaReadToUpstream chan loc meta.
+Proof.
+  unfolder'.
+  destruct tlab eqn:WW; vauto; eauto.
+Qed.
+
 
 Lemma init_non_r r (Rr: is_r r) (INIT: is_init r): False.
 Proof. generalize Rr, INIT. unfolder'. by destruct r. Qed. 
