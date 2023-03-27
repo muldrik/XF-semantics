@@ -2106,6 +2106,19 @@ destruct (excluded_middle_informative _) as [X | X].
   auto.
 Qed.
 
+Lemma sb_same_tid w r (SB: sb G w r) (NOT_INIT: Eninit w): tid w = tid r.
+Proof.
+  red in SB.
+  assert (~ is_init w).
+  { intro.
+    eapply Eninit_non_init; red; eauto. }
+  unfold tid.
+  apply seq_eqv_lr in SB.
+  destruct SB as [Ex [SBxy Ey]].
+  unfold ext_sb in SBxy.
+  destruct w, r; desf.
+Qed.
+
 Ltac same_chan_prover := ins; apply set_extensionality; unfold same_chan, in_chan; simpl; red; splits; red; ins; desc; vauto.
 
 Lemma fpga_all_fence_sb_respects_vis: (sb G ⨾ ⦗is_fence_resp_all⦘) ⊆ vis_lt'.
@@ -2178,10 +2191,16 @@ Proof.
     lia.
 Qed.
 
-Lemma fpga_resp_vis_respects_sb_notr: restr_rel (fun e => is_fpga e /\ ~is_rd_resp e /\ is_resp e) (poch G) ⊆ vis_lt'.
+Lemma fpga_resp_vis_respects_sb_notr: (⦗is_fpga⦘ ⨾ poch G ⨾ ⦗minus_event (is_resp) is_rd_resp⦘ ) ⊆ vis_lt'.
+(* Lemma fpga_resp_vis_respects_sb_notr: restr_rel (fun e => is_fpga e /\ ~is_rd_resp e /\ is_resp e) (poch G) ⊆ vis_lt'. *)
 Proof.
-  unfold restr_rel. red. ins. destruct H as [POCHxy [Rx Ry]].
+  red. ins. destruct H as [x0 [[EQ Rx] [y0 [POCHxy [EQ' NR_RESP]]]]].
+  subst x0; subst y0.
   destruct POCHxy as [SBxy CHxy].
+  (* apply seq_eqv_lr in SBxy. *)
+  destruct (vis_lt_init_helper x y); vauto.
+  destruct H as [ENX ENY].
+  assert (is_fpga y) as Ry. { destruct CHxy. remember (sb_same_tid x y SBxy). unfolder'; desf. }
   cut (is_fence_resp_all y \/ ~is_fence_resp_all y).
   2: { unfolder'; desf; intuition. }
   intro FN; destruct FN as [FNY | NFNY].
@@ -2195,12 +2214,13 @@ Proof.
   (* apply tb_respects_sb in SBxy. destruct SBxy as [TBxy TIDxy].  *)
   red in TBxy.
   cut (is_wr_resp x \/ ~is_wr_resp x).
-  2: { unfolder'; destruct Rx; unfold is_fpga in *; desf; intuition. }
-  destruct Rx as [FX [NRX RSPX]].
-  destruct Ry as [Fy [NRY RSPY]].
+  2: { unfolder'; unfold is_fpga in *; desf; intuition. }
+  (* destruct Rx as [FX [NRX RSPX]].
+  destruct Ry as [Fy [NRY RSPY]]. *)
   intro K; destruct K as [WRX | NWRX].
   2: {
     forward eapply (TI_LE_VIS y); vauto.
+    { red in NR_RESP; desf. }
     forward eapply (TI_GE_VIS x); vauto.
     { unfolder'. unfold is_w; desf. }
     lia.
@@ -2240,9 +2260,11 @@ Proof.
       apply lt_diff in H1. desc. rewrite W_P_CORR0, W_P_CORR in H1. 
       destruct (NPeano.Nat.lt_ge_cases px py); auto. 
       remember (count_upto_more py px (is_fpga_prop ∩₁ in_chan ch) H2); lia. }
+      destruct NR_RESP.
   ex_des.
   destruct (NPeano.Nat.lt_ge_cases (write2prop (trace_index x)) (trace_index y)) as [| LE]; auto.
   exfalso.
+  rename H into H'.
   forward eapply (@fpga_write_structure (EventLab x)) as H. 
   { vauto. }
   desc. inversion H. clear H.  
@@ -2265,7 +2287,7 @@ Proof.
     remember (FpgaEvent (Fpga_write_resp c loc val) index meta) as e_w.
     forward eapply (@buffer_size_upstream_write c (trace_index e_fence)) as BUF_SIZE. 
     { destruct (trace_length tr); auto. simpl in *. lia. }
-    simpl in BUF_SIZE. rewrite <- H0 in BUF_SIZE. simpl in BUF_SIZE.
+    simpl in BUF_SIZE. rewrite <- H1 in BUF_SIZE. simpl in BUF_SIZE.
     rewrite NO_UPSTREAM in BUF_SIZE. simpl in BUF_SIZE. rewrite Nat.add_0_r in BUF_SIZE.
     remember (write2prop (trace_index e_w)) as vis_w.  
     assert (count_upto (fpga_write' ∩₁ same_chan (trace_labels (trace_index e_w))) (trace_index e_w) =
@@ -2325,18 +2347,6 @@ Proof.
   vauto.
 Qed.
   
-Lemma sb_same_tid w r (SB: sb G w r) (NOT_INIT: Eninit w): tid w = tid r.
-Proof.
-  red in SB.
-  assert (~ is_init w).
-  { intro.
-    eapply Eninit_non_init; red; eauto. }
-  unfold tid.
-  apply seq_eqv_lr in SB.
-  destruct SB as [Ex [SBxy Ey]].
-  unfold ext_sb in SBxy.
-  destruct w, r; desf.
-Qed.
 
 Lemma no_read_from_future': irreflexive (rf G ⨾ sb G).
 Proof.
@@ -4540,7 +4550,9 @@ Proof.
       destruct F_ONE as [x0 [POCH [XEQ F_ONE]]].
       subst x0.
       eapply (fpga_resp_vis_respects_sb_notr x x').
-      red. splits; vauto; unfolder'; desf.
+      apply seq_eqv_lr.
+      unfold minus_event.
+      splits; vauto; unfolder'; desf.
     }
     destruct (vis_SPO).
     basic_solver.
@@ -4619,6 +4631,23 @@ Proof.
   - apply fence_fpga_respects_vislt; vauto.
 Qed.
 
+Lemma readpair_respects_poch: readpair G ⊆ poch G.
+Proof.
+  red.
+  ins.
+  apply seq_eqv_lr in H.
+  destruct H as [RREQ [PAIR RRSP]].
+  red in PAIR.
+  Admitted.
+
+Lemma poch_trans: transitive (poch G).
+Proof.
+  unfold poch.
+  assert (sb G ∩ same_ch ⊆ sb G) as INC by basic_solver.
+  assert (transitive same_ch). {admit. }
+  remember (sb_trans) as kek.
+  remember (kek G).
+  Admitted.
 
 Lemma read_after_write': irreflexive (fr G ⨾ poch G ⨾ readpair G).
 Search (_ ;; _ ⊆ _).
@@ -4630,10 +4659,19 @@ Search (_ ;; _ ⊆ _).
     ins.
     destruct H as [x0 [POCH [x' [[EQ REQ] [y' [PAIR [EQ' RESP]]]]]]].
     subst x0; subst y'.
-    assert (vis_lt' x x').
-    { destruct REQ. forward eapply (fpga_resp_vis_respects_sb_notr x x'); vauto.
-      red; ins; split; vauto. unfolder'; unfold is_fpga; desf; intuition.
-     }
+    assert (poch G x' y). { eapply readpair_respects_poch; red; ins; apply seq_eqv_lr; splits; vauto. }
+    assert (poch G x y). { eapply poch_trans; eauto. }
+    assert (sb G x y) by (destruct H0; vauto).
+    destruct (vis_lt_init_helper x y H1); vauto.
+    (* assert (vis_lt' x x').
+    { destruct POCH as [SBXX SAME_CH].
+      destruct (vis_lt_init_helper x x'); vauto.
+      destruct H as [ENX ENX'].
+      destruct REQ. forward eapply (fpga_resp_vis_respects_sb_notr x x'); vauto.
+      apply seq_eqv_lr; unfold minus_event.
+      remember (sb_same_tid x x' SBXX ENX).
+      splits; vauto; unfolder'; unfold is_fpga in *; desf. unfold is_fpga; desf; intuition.
+     } *)
     destruct H as [e1 [FR [e2 [POCH [e2' [[EQ RREQ] [e2_resp [RR_PAIR [EQ' RRES]]]]]]]]].
     subst e2_resp.
     subst e2'.
