@@ -339,6 +339,35 @@ Proof.
   by desc. 
 Qed.
 
+(* Lemma sim_subtraces_conv' (C1 C2 C3 C4: SyLabel -> Prop)
+           (LEN: trace_length (trace_filter C1 tr) = trace_length (trace_filter C2 tr))
+           (LEN': trace_length (trace_filter C3 tr) = trace_length (trace_filter C4 tr)):
+  forall i (C1i: C1 (trace_labels i)) (C3i : C3 (trace_labels i))
+    (DOMi: NOmega.lt_nat_l i (trace_length tr)),
+  exists j, C2 (trace_labels j) /\ C4 (trace_labels j) /\
+       NOmega.lt_nat_l j (trace_length tr) /\
+       count_upto C1 i = count_upto C2 j /\
+       count_upto C3 i = count_upto C4 j.
+Proof.
+  ins.
+  remember (trace_filter C1 tr) as tr1. remember (trace_filter C2 tr) as tr2.
+  remember (trace_filter C3 tr) as tr3. remember (trace_filter C4 tr) as tr4.
+  pose proof (trace_lt_length_filter i tr DOMi C1 def_lbl C1i).
+  pose proof (trace_lt_length_filter i tr DOMi C3 def_lbl C3i).
+  fold (count_upto C1 i) in H. remember (count_upto C1 i) as k.
+  fold (count_upto C3 i) in H0. remember (count_upto C3 i) as k'.
+  rewrite <- Heqtr1, LEN in H. pose proof H as DOM_TR2k. 
+  rewrite <- Heqtr3, LEN' in H0. pose proof H0 as DOM_TR2k'. 
+  rewrite Heqtr2 in H. apply trace_nth_filter with (d := def_lbl) in H.
+  rewrite Heqtr4 in H0. apply trace_nth_filter with (d := def_lbl) in H0.
+  destruct H as [j [DOMj [FILTER_MATCH COUNT]]].
+  exists j. splits; auto.
+  unfold trace_labels. rewrite <- FILTER_MATCH.
+  apply trace_nth_in with (d := def_lbl) in DOM_TR2k.
+  rewrite Heqtr2 in DOM_TR2k. apply trace_in_filter in DOM_TR2k.
+  by desc.  *)
+
+
 Lemma lt_nondefault i:
   trace_labels i <> def_lbl <-> NOmega.lt_nat_l i (trace_length tr).
 Proof. 
@@ -711,6 +740,66 @@ Proof.
   forward eapply (TSi i) with (d := def_lbl) as TSi; vauto.
 Qed.
 
+Definition fpga_up_prop := fpga_read_ups' ∪₁ fpga_write'.
+Definition fpga_any_mem_prop := fpga_mem_read' ∪₁ is_fpga_prop.
+
+Lemma filterP_union_length [A : Type] [p1 p2: A -> Prop] l (DIFFERENT: p1 ∩₁ p2 ≡₁ ∅):
+  length (filterP (p1 ∪₁ p2) l) = length (filterP p1 l) + length (filterP p2 l).
+Proof.
+  induction l; simpl; auto.
+  destruct (excluded_middle_informative (p1 a)).
+  { assert ((p1 ∪₁ p2) a) by vauto.
+    destruct (excluded_middle_informative (p2 a)).
+    { exfalso. assert ((p1 ∩₁ p2) a) by vauto. eapply (proj1 DIFFERENT); vauto. }
+    simpl. destruct excluded_middle_informative; vauto. simpl. lia. }
+  destruct (excluded_middle_informative (p2 a)).
+  2: { assert (~((p1 ∪₁ p2) a)) by (intro H; destruct H; vauto). 
+      destruct (excluded_middle_informative); vauto. }
+  assert ((p1 ∪₁ p2) a) by vauto.
+  destruct excluded_middle_informative; vauto.
+  simpl; lia.
+Qed.
+
+Lemma read_ups_or_store_ups entry: 
+  (is_read_ups entry /\ ~is_store_ups entry) 
+  \/ (is_store_ups entry /\ ~is_read_ups entry).
+Proof.
+  destruct entry.
+  destruct u; vauto; desf.
+Qed.
+
+Lemma buffer_size_upstream chan i (DOM: NOmega.le (NOnum i) (trace_length tr)):
+  count_upto (fpga_up_prop ∩₁ in_chan chan) i = 
+  count_upto (fpga_any_mem_prop ∩₁ in_chan chan) i + length (up_bufs (states i) chan).
+Proof.
+  unfold fpga_up_prop, fpga_any_mem_prop.
+  remember (set_inter_union_l fpga_read_ups' fpga_write' (in_chan chan)) as s.
+  remember (set_extensionality s) as e.
+  rewrite e.
+  clear Heqs; clear Heqe; clear s; clear e.
+
+  remember (set_inter_union_l fpga_mem_read' is_fpga_prop (in_chan chan)) as s.
+  remember (set_extensionality s) as e.
+  rewrite e.
+  clear Heqs; clear Heqe; clear s; clear e.
+  unfold count_upto.
+  erewrite filterP_union_length.
+  2: { split; (try basic_solver); intro; ins; exfalso; destruct H as [[H1 H2] [H3 H4]]; unfolder'; desf. }
+  erewrite filterP_union_length.
+  2: { split; (try basic_solver); intro; ins; exfalso; destruct H as [[H1 H2] [H3 H4]]; unfolder'; desf. }
+  forward eapply (buffer_size_upstream_write chan i); vauto.
+  forward eapply (buffer_size_upstream_read chan i); vauto.
+  unfold count_upto in *.
+  cut (length (filter is_read_ups (up_bufs (states i) chan)) + 
+       length (filter is_store_ups (up_bufs (states i) chan)) = 
+       length (up_bufs (states i) chan)).
+  { ins. lia. }
+  induction (up_bufs (states i) chan); simpl; auto.
+  destruct (read_ups_or_store_ups a).
+  { destruct H. desf. simpl; lia. }
+  { destruct H. desf. simpl; lia. }
+Qed.
+
 Lemma buffer_size_downstream chan i (DOM: NOmega.le (NOnum i) (trace_length tr)):
   count_upto (fpga_read_resp' ∩₁ in_chan chan) i + length (down_bufs (states i) chan)= 
   count_upto (fpga_mem_read' ∩₁ in_chan chan) i .
@@ -847,6 +936,12 @@ Lemma EXACT_CHAN_MEMREADS chan:
 Proof.
   Admitted.
 
+Lemma EXACT_CHAN_ANY_PROPS chan:
+  trace_length (trace_filter (fpga_up_prop ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_any_mem_prop ∩₁ in_chan chan) tr).
+Proof.
+  Admitted. (* Could be proved from already existing *)
+
 (*
 Lemma EXACT_CHAN_WR_REQS chan:
   trace_length (trace_filter (fpga_write_req' ∩₁ in_chan chan) tr) =
@@ -868,7 +963,9 @@ exists p,
   (* ⟪SAME_META: meta_l (trace_labels w) = meta_l (trace_labels p)⟫ /\ *)
   ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\
   ⟪W_P_CORR: count_upto (fpga_write' ∩₁ same_chan (trace_labels w)) w =
-              count_upto (is_fpga_prop ∩₁ same_chan (trace_labels w)) p⟫.
+             count_upto (is_fpga_prop ∩₁ same_chan (trace_labels w)) p⟫.
+  (* ⟪UPS_MEM_CORR: count_upto (fpga_up_prop ∩₁ same_chan (trace_labels w)) w = 
+                 count_upto (fpga_any_mem_prop ∩₁ same_chan (trace_labels w)) p⟫. *)
 Proof.
 simpl.
 assert (DOM: NOmega.lt_nat_l w (trace_length tr)).
@@ -888,6 +985,46 @@ pose proof sim_subtraces_conv as TMP. specialize_full TMP.
   rewrite H. vauto. }
 { auto. }
 desc. exists j. splits; vauto.
+Qed.
+
+Definition same_ups_mem x y := (fpga_read_ups' x /\ fpga_mem_read' y) \/ (fpga_write' x /\ is_fpga_prop y).
+
+Lemma ups2any_mem_fpga_lem w
+    (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
+    (W: fpga_up_prop (trace_labels w)):
+exists p,
+  ⟪THREAD_PROP: (fpga_any_mem_prop ∩₁ same_chan (trace_labels w)) (trace_labels p)⟫ /\
+  ⟪SAME_TYPE: same_ups_mem (trace_labels w) (trace_labels p)⟫ /\
+  (* ⟪SAME_META: meta_l (trace_labels w) = meta_l (trace_labels p)⟫ /\ *)
+  ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\
+  ⟪W_P_CORR: count_upto (fpga_up_prop ∩₁ same_chan (trace_labels w)) w =
+             count_upto (fpga_any_mem_prop ∩₁ same_chan (trace_labels w)) p⟫.
+  (* ⟪UPS_MEM_CORR: count_upto (fpga_up_prop ∩₁ same_chan (trace_labels w)) w = 
+                 count_upto (fpga_any_mem_prop ∩₁ same_chan (trace_labels w)) p⟫. *)
+Proof.
+simpl.
+assert (DOM: NOmega.lt_nat_l w (trace_length tr)).
+{ destruct (classic (NOmega.lt_nat_l w (trace_length tr))); auto.
+  exfalso. apply ge_default in H. rewrite H in W.
+  unfold fpga_up_prop in *. unfolder'. intuition. }
+destruct W as [R | W].
+2: {
+  pose proof (fpga_write_structure _ W). 
+  desc.
+  assert (same_chan (trace_labels w) ≡₁ in_chan chan).
+  { rewrite H. simpl. unfold same_chan. simpl.
+    unfold in_chan.
+    red. split; red; ins; desc; vauto. }
+  apply set_extensionality in H0. rewrite H0 in *. 
+  pose proof sim_subtraces_conv as TMP. specialize_full TMP.
+  { eapply (EXACT_CHAN_ANY_PROPS chan). }
+  { red. splits; eauto;
+    rewrite H; vauto. }
+  { auto. }
+  desc. exists j. splits; vauto.
+  unfold same_ups_mem.
+  right; splits; vauto.
+}
 Qed.
 
 Lemma filter_eq_pred (l: list SyLabel) (f g: SyLabel -> Prop): (forall x, (f x <-> g x)) -> filterP f l = filterP g l.
@@ -4439,6 +4576,41 @@ Proof.
     by apply ninit_vis_helper. }
 Qed.
 
+Lemma vis_respects_ppoFpga_part2: (⦗is_rd_resp⦘ ⨾ sb G ⨾ ⦗minus_event (acts G) is_rd_resp⦘) ⊆ vis_lt'.
+Proof.
+  red. ins.
+  rename H into PF.
+    apply seq_eqv_lr in PF.
+    destruct PF as [R [SBxy NR]].
+    red in NR.
+    destruct NR as [ACT_Y NR].
+    red. right. apply seq_eqv_lr. 
+    red in SBxy.
+    apply seq_eqv_lr in SBxy.
+    destruct SBxy as [ACT_X [SBxy _]].
+    assert (Eninit x). { destruct ACT_X; vauto; unfolder'; desf. }
+    assert (Eninit y). { destruct ACT_Y; vauto. red in SBxy. destruct x, y; unfolder'; desf. }
+    splits; vauto.
+    Search (vis' _).
+    forward eapply (TI_LE_VIS y); vauto.
+    forward eapply (r_vis x); vauto.
+    { unfolder'. unfold is_r; desf. }
+    ins.
+    remember (proj1 tb_respects_sb) as SB_TB.
+    red in SB_TB.
+    forward eapply (SB_TB x y).
+    { basic_solver. }
+    intro TB.
+    apply seq_eqv_lr in TB.
+    destruct TB as [_ [[TB TID] _]].
+    red in TB.
+    lia.
+Qed.
+
+Lemma pair_in_vis_lt: (allpair G) ⊆ vis_lt'.
+Proof.
+  Admitted. (* TODO *)
+
 (* Lemma vis_respects_ppoFpga: (ppoFpga G) ⊆ vis_lt'.
 Proof.
   red. ins. red in H.
@@ -4501,6 +4673,15 @@ Proof.
     destruct SBxy as [ACT_X [SBxy _]].
   }
 Qed. *)
+
+(* Lemma a: acyclic (vis_lt' ∪ co G).
+Proof.
+  Search acyclic union seq.
+  apply AuxRel.acyclic_union.
+  { admit. }
+  red.
+  Search clos_trans seq. *)
+
 
 Lemma vislt_closed: vis_lt'⁺ ≡ vis_lt'.
 Proof.
@@ -4631,6 +4812,327 @@ Proof.
   - apply fence_fpga_respects_vislt; vauto.
 Qed.
 
+Lemma a: dom_rel (rfe G) ⊆₁ set_compl is_req.
+Proof.
+  Admitted.
+
+Lemma init_or_Eninit x (ACTS: acts G x): is_init x \/ Eninit x.
+Proof.
+  generalize Eninit_non_init; ins.
+Qed.
+
+Lemma acyclic_vis_lt: acyclic vis_lt'.
+Proof.
+    cdes vis_SPO. apply trans_irr_acyclic; auto.
+Qed.
+
+Lemma poch_trans: transitive (poch G).
+Proof.
+  unfold poch.
+  (* arewrite (sb G ∩ same_ch ⊆ sb G). as INC by basic_solver. *)
+  assert (transitive same_ch). {admit. }
+  remember (sb_trans) as kek.
+  remember (kek G).
+  Admitted.
+
+Lemma poch_acyclic: acyclic (poch G).
+  unfold poch.
+  arewrite (sb G ∩ same_ch ⊆ sb G).
+  apply sb_acyclic.
+Qed.
+
+Lemma readpair_in_poch: readpair G ⊆ poch G.
+Proof. Admitted.
+
+Lemma writepair_in_poch: writepair G ⊆ poch G.
+Proof. Admitted.
+
+Lemma fenceonepair_in_poch: fenceonepair G ⊆ poch G.
+Proof. Admitted.
+
+Lemma fenceallpair_in_sb: fenceallpair G ⊆ sb G.
+Proof. Admitted.
+
+Lemma readpair_in_vis_lt: readpair G ⊆ vis_lt'.
+Proof. Admitted.
+
+Lemma poch_in_sb: poch G ⊆ sb G.
+Proof.
+  unfold poch.
+  basic_solver.
+Qed.
+
+Lemma poch_fpga x y: poch G x y -> is_fpga x /\ is_fpga y.
+Proof.
+  ins.
+  red in H.
+  red in H;
+  desf.
+  red in H0.
+  desf.
+Qed.
+
+Lemma ppo_fpga_readpair_in_vis_lt: (⦗is_resp⦘ ⨾ poch G ⨾ ⦗minus_event (acts G) is_rd_resp⦘) ⨾ (readpair G) ⊆ vis_lt'.
+Proof.
+  red; ins.
+  destruct H as [x0 [TO_REQ PAIR]].
+  assert ((poch G) x0 y) as POCH'. { apply readpair_in_poch. do 2 red; vauto. }
+  apply seq_eqv_lr in TO_REQ.
+  destruct TO_REQ as [RSX [POCH NRX0]].
+  assert ((poch G) x y) as POCH_MAIN. { apply (poch_trans x x0 y POCH POCH'). }
+  destruct (poch_fpga x x0 POCH) as [FPGA_X _].
+  apply seq_eqv_lr in PAIR.
+  destruct PAIR as [[EGX0 RD_REQ] [PAIR [EGY RD_RESP]]].
+  cut (is_wr_resp x \/ ~is_wr_resp x); [|tauto].
+  intro H.
+  destruct H as [WRX | NWRX].
+  2: {
+     destruct (vis_lt_init_helper x y); vauto.
+     { apply poch_in_sb; vauto. }
+     destruct H as [ENX ENY].
+     eapply (proj2 vis_SPO x x0 y).
+     { unfold vis_lt'; right.
+       assert (Eninit x0) as ENX0 by (destruct (init_or_Eninit x0); eauto; unfolder'; desf).
+       apply seq_eqv_lr; splits; vauto.
+       forward eapply (TI_GE_VIS x); vauto.
+       { unfolder'; desf. }
+       forward eapply (TI_LE_VIS x0); vauto.
+       { unfolder'; desf. }
+       ins.
+       apply poch_in_sb in POCH.
+       red in POCH.
+       forward eapply (proj1 tb_respects_sb x x0) as H'.
+        { apply seq_eqv_lr; apply seq_eqv_lr in POCH; desf. }
+       apply seq_eqv_lr in H'.
+       destruct H' as [_ [[TB _] A]].
+       red in TB.
+       lia.
+      }
+      apply readpair_in_vis_lt.
+      apply seq_eqv_lr; splits; vauto.
+  }
+  Admitted.
+(* Qed. *)
+
+Lemma ppo_fpga_pair_in_vis_lt: (⦗is_resp⦘ ⨾ poch G ⨾ ⦗minus_event (acts G) is_rd_resp⦘) ⨾ (allpair G) ⊆ vis_lt'.
+Proof.
+  red; ins.
+  destruct H as [x0 [TO_REQ PAIR]].
+  apply seq_eqv_lr in TO_REQ.
+  destruct TO_REQ as [RSX [POCH NRX0]].
+  destruct (poch_fpga x x0 POCH) as [FPGA_X _].
+  destruct PAIR as [[[RP | WP] | FOP] | FAP].
+  4: { apply fpga_all_fence_sb_respects_vis.
+    apply seq_eqv_r.
+    splits.
+    { apply poch_in_sb in POCH. 
+      apply fenceallpair_in_sb in FAP.
+      remember (@sb_trans G) as T.
+      red in T.
+      exact (T x x0 y POCH FAP). }
+    do 2 red in FAP.
+    apply seq_eqv_lr in FAP.
+    destruct FAP as [_ [_ [_ RES]]]; auto. }
+  2: { apply fpga_resp_vis_respects_sb_notr.
+    apply seq_eqv_lr.
+    splits; desf.
+    2: { do 2 red in WP.
+       apply seq_eqv_lr in WP.
+       destruct WP as [[EGX0 REQ_X0] [RRPAIR [EGY RSP_Y]]].
+       red. unfolder'; desf; intuition. }
+    apply writepair_in_poch in WP.
+    apply (poch_trans x x0 y POCH WP). }
+  2: { apply fpga_resp_vis_respects_sb_notr.
+    apply seq_eqv_lr.
+    splits; desf.
+    2: { do 2 red in FOP.
+       apply seq_eqv_lr in FOP.
+       destruct FOP as [[EGX0 REQ_X0] [RRPAIR [EGY RSP_Y]]].
+       red. unfolder'; desf; intuition. }
+    apply fenceonepair_in_poch in FOP.
+    apply (poch_trans x x0 y POCH FOP). }
+  apply ppo_fpga_readpair_in_vis_lt.
+  red; ins.
+  exists x0; splits; vauto.
+  basic_solver.
+Qed.
+  
+
+Lemma propagation': acyclic (ppo G ∪ fence G ∪ rfe G ∪ fre G ∪ co G).
+Proof.
+  set (r := ⦗is_resp⦘ ⨾ poch G ⨾ ⦗minus_event (acts G) is_rd_resp⦘).
+  apply acyclic_mori with (x := <| set_compl is_req |> ;; vis_lt' ∪ allpair G ∪ r).
+  { red. (* все либо с resp, либо allpair, либо r *)
+  Search inclusion union.
+    apply inclusion_union_l.
+    2: { left. left.
+      apply seq_eqv_l.
+      splits.
+      2: apply co_implies_vis_lt; vauto.
+      apply seq_eqv_lr in H.
+      destruct H as [[_ W] _].
+      red; unfold is_w, is_req in *; desf. }
+    apply inclusion_union_l.
+    2: { arewrite (fre G ⊆ fr G).
+      left. left.
+      apply seq_eqv_l.
+      splits.
+      2: apply fr_implies_vis_lt; vauto.
+      remember (wf_frD WFG).
+      apply s in H.
+      apply seq_eqv_lr in H.
+      red; unfold is_r, is_req in *; desf. }
+    apply inclusion_union_l.
+    2: { left. left.
+      apply seq_eqv_l.
+      splits.
+      2: apply rfe_implies_vis_lt; vauto.
+      remember (wf_rfeD WFG).
+      apply s in H.
+      apply seq_eqv_lr in H.
+      red; unfold is_w, is_req in *; desf. }
+    apply inclusion_union_l.
+    2: { 
+      apply inclusion_union_l.
+      { left. left.
+        apply seq_eqv_l.
+        splits.
+        2: apply fence_cpu_respect_vislt; vauto.
+        red in H.
+        destruct H as [x' [SB P]].
+        assert (acts G x) as ACT by (apply seq_eqv_lr in SB; desf).
+        destruct (init_or_Eninit x ACT).
+        { unfolder'; desf. }
+        apply seq_eqv_l in P; destruct P as [FN _].
+        forward eapply (sb_same_tid x x' SB) as TID; vauto.
+        unfolder'; desf. } 
+      left. left.
+      apply seq_eqv_l.
+      splits.
+      2: apply fence_fpga_respects_vislt; vauto.
+      apply seq_eqv_l in H.
+      unfolder'; desf. } 
+    apply inclusion_union_l.
+    { left. left.
+      apply seq_eqv_l.
+      splits.
+      2: apply vis_respects_ppo_cpu; vauto.
+      destruct H as [_ [CPU _]].
+      unfolder'; unfold is_cpu in *; desf. }
+    apply inclusion_union_l.
+    2: { left. right. vauto. }
+    apply inclusion_union_l.
+    { ins. }
+    left. left.
+    apply seq_eqv_l.
+    splits.
+    2: apply vis_respects_ppoFpga_part2; vauto.
+    apply seq_eqv_lr in H.
+    unfolder'; unfold is_cpu in *; desf. }
+  apply acyclic_union1.
+  { arewrite (<| set_compl is_req |> ;; vis_lt' ⊆ vis_lt').
+    arewrite (allpair G ⊆ vis_lt').
+    { exact pair_in_vis_lt. }
+    rewrite unionK.
+    exact acyclic_vis_lt. }
+  { arewrite (r ⊆ poch G); [|apply poch_acyclic].
+    Search eqv_rel inclusion.
+    red; ins.
+    apply seq_eqv_lr in H.
+    desf. }
+  rewrite ct_of_trans with (r := r).
+  2: { red; ins.
+    apply seq_eqv_lr in H, H0.
+    apply seq_eqv_lr.
+    splits; desf.
+    forward eapply (poch_trans); ins; basic_solver.
+  }
+  Search acyclic seq.
+  apply acyclic_seqC.
+  arewrite (r ⊆ r ;; <|is_req|> ∪ r ;; <| set_compl is_req |>).
+  { clear. unfolder. ins. desf. tauto. }
+  arewrite (r ;; <| set_compl is_req |> ⊆ vis_lt').
+  {  unfold r.
+    Search (_ ;; _ ;; _).
+    do 2 (rewrite seqA).
+    rewrite <- AuxRel.id_inter.
+    red; ins.
+    eapply fpga_resp_vis_respects_sb_notr.
+    apply seq_eqv_lr in H.
+    apply seq_eqv_lr.
+    desf.
+    red in H1; desf.
+    red in H1; desf.
+    splits; desf.
+    { unfolder'. unfold is_fpga; desf. }
+    destruct (poch_fpga x y H0). red. splits; vauto. unfolder'; unfold is_fpga in *; desf.
+  }
+  (* Search clos_trans seq clos_refl_trans. *)
+  rewrite ct_begin.
+  arewrite ((r ⨾ ⦗is_req⦘ ∪ vis_lt')
+   ⨾ (⦗set_compl is_req⦘ ⨾ vis_lt' ∪ allpair G) ⊆ vis_lt').
+  2: { arewrite (<| set_compl is_req |> ;; vis_lt' ⊆ vis_lt'). 
+       arewrite (allpair G ⊆ vis_lt'); [exact pair_in_vis_lt|].
+       rewrite unionK.
+       arewrite (vis_lt' ;; clos_refl_trans vis_lt' ⊆ vis_lt').
+       2: exact acyclic_vis_lt.
+       rewrite <- ct_begin.
+       apply ct_of_trans.
+       destruct (vis_SPO); vauto. }
+  rewrite !seq_union_l.
+  rewrite !seq_union_r.
+  unionL.
+  { clear. basic_solver. }
+  { arewrite (is_req ⊆₁ minus_event (acts G) is_rd_resp). 
+    2: { unfold r. rewrite <- seqA.
+      rewrite seqA.
+      rewrite seqA.
+      rewrite seqA.
+      assert (⦗is_resp⦘ ⨾ poch G ⨾ ⦗minus_event (acts G) is_rd_resp⦘ ⨾ ⦗minus_event (acts G) is_rd_resp⦘ ;; (allpair G) ≡ (⦗is_resp⦘ ⨾ poch G ⨾ ⦗minus_event (acts G) is_rd_resp⦘ ⨾ ⦗minus_event (acts G) is_rd_resp⦘) ;; (allpair G)) by basic_solver.
+      rewrite H.
+      rewrite seq_eqvK.
+    apply ppo_fpga_pair_in_vis_lt. }
+    red; ins.
+    red.
+  { rewrite inclusion_seq_eqv_l.
+    Search seq.
+    apply rewrite_trans.
+    destruct (vis_SPO); vauto. }
+  arewrite (allpair G ⊆ vis_lt'); [exact pair_in_vis_lt|].
+    apply rewrite_trans.
+    destruct (vis_SPO); vauto.
+Qed.
+
+  (* unfold ppo.
+  unfold ppoFpga.
+  rewrite fence_respects_vislt.
+  rewrite rfe_implies_vis_lt.
+  arewrite (fre G ⊆ fr G).
+  rewrite fr_implies_vis_lt.
+  rewrite co_implies_vis_lt.
+  Search union.
+  unfold ppo.
+  rewrite vis_respects_ppo_cpu.
+  unfold ppoFpga.
+  rewrite vis_respects_ppoFpga_part2.
+  rewrite pair_in_vis_lt.
+  rewrite !unionA, !unionK.
+  rewrite unionC.
+  rewrite !unionA, !unionK.
+  set (r := ⦗is_resp⦘ ⨾ poch G ⨾ ⦗minus_event (acts G) is_rd_resp⦘).
+  Search union acyclic seq.
+  apply acyclic_union1.
+  admit. admit.
+  Search transitive clos_trans.
+  rewrite ct_of_trans.
+  2: admit.
+  rewrite ct_of_trans.
+  2: admit.
+  arewrite (r ⨾ vis_lt' ⊆ vis_lt').
+  2: admit. *)
+
+
+
 Lemma readpair_respects_poch: readpair G ⊆ poch G.
 Proof.
   red.
@@ -4640,14 +5142,6 @@ Proof.
   red in PAIR.
   Admitted.
 
-Lemma poch_trans: transitive (poch G).
-Proof.
-  unfold poch.
-  assert (sb G ∩ same_ch ⊆ sb G) as INC by basic_solver.
-  assert (transitive same_ch). {admit. }
-  remember (sb_trans) as kek.
-  remember (kek G).
-  Admitted.
 
 Lemma read_after_write': irreflexive (fr G ⨾ poch G ⨾ readpair G).
 Search (_ ;; _ ⊆ _).
