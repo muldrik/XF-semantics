@@ -69,7 +69,7 @@ Notation "'Cpu'" := is_cpu.
 Notation "'Fpga'" := is_fpga.
 
 
-Definition same_ch := fun a b => (Fpga a) /\ (Fpga b) /\ chan a = chan b.
+Definition same_ch := fun a b => chan_opt a = chan_opt b /\ chan_opt a <> None.
 Definition same_loc := fun a b => loc a = loc b.
 Definition same_meta := fun a b => meta a = meta b.
 
@@ -210,9 +210,9 @@ Record Ax86Consistent := {
     no_read_from_future: irreflexive (rf ⨾ sb);
     observe_same_channel: irreflexive (fre ⨾ rfe ⨾ poch);
     fence_all_response: irreflexive (sb ⨾ fenceallpair ⨾ sb ⨾ writepair⁻¹);
-    fence_one_response: irreflexive (sb ⨾ fenceonepair ⨾ sb ⨾ writepair⁻¹);
+    fence_one_response: irreflexive (poch ⨾ fenceonepair ⨾ sb ⨾ writepair⁻¹);
     fence_all_block: irreflexive (sb ⨾ writepair ⨾ sb ⨾ fenceallpair⁻¹);
-    fence_one_block: irreflexive (sb ⨾ writepair ⨾ sb ⨾ fenceonepair⁻¹);
+    fence_one_block: irreflexive (poch ⨾ writepair ⨾ sb ⨾ fenceonepair⁻¹);
 }.
 
 Definition bounded_threads := exists n, forall x, E x -> match tid x with 

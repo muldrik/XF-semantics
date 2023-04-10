@@ -93,8 +93,8 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
                  (mkState (w_pool ++ cons ((fence_all_wp), meta) nil) r_pool up_bufs down_bufs sh_mem cpu_bufs)
 | fpga_flush_write w_pool head tail r_pool up_bufs down_bufs sh_mem cpu_bufs loc val channel meta index
       (WRITE_POOL: w_pool = head ++ cons ((store_wp channel loc val), meta) tail)
-      (NO_FENCE_ONE: forall meta', ~ In ((fence_ch_wp channel), meta') tail)
-      (NO_FENCE_ALL: forall meta', ~ In ((fence_all_wp), meta') tail):
+      (NO_FENCE_ONE: forall meta', ~ In ((fence_ch_wp channel), meta') head)
+      (NO_FENCE_ALL: forall meta', ~ In ((fence_all_wp), meta') head):
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
                  (EventLab (FpgaEvent (Fpga_write_resp channel loc val) index meta))
                  (mkState (head ++ tail) r_pool (upd up_bufs channel (up_bufs channel ++ cons (store_up loc val, meta) nil)) down_bufs sh_mem cpu_bufs)
@@ -116,7 +116,7 @@ Inductive TSOFPGA_step: SyState -> SyLabel -> SyState -> Prop :=
                  (EventLab (FpgaEvent (Fpga_fence_resp_all) index meta))
                  (mkState w_pool' r_pool up_bufs down_bufs sh_mem cpu_bufs)
 | fpga_flush_read w_pool r_pool head tail up_bufs down_bufs sh_mem cpu_bufs loc channel meta
-      (READ_POOL: r_pool = head ++ cons (channel, loc, meta) tail):
+      (READ_POOL: r_pool = head ++ cons (channel, loc, meta) tail) :
     TSOFPGA_step (mkState w_pool r_pool up_bufs down_bufs sh_mem cpu_bufs)
                  (FpgaReadToUpstream channel loc meta)
                  (mkState w_pool (head ++ tail) (upd up_bufs channel (up_bufs channel ++ cons(read_up loc, meta) nil)) down_bufs sh_mem cpu_bufs)
@@ -414,29 +414,55 @@ Definition val_l (lbl: SyLabel) := match lbl with
   | _ => 0
   end.
 
-Definition chan_l (lbl: SyLabel) := match lbl with
+(* Definition chan_l (lbl: SyLabel) := match lbl with
   | EventLab e => chan e
   | FpgaMemFlush c _ _ _ => c
   | FpgaMemRead c _ _ _ => c
   | FpgaReadToUpstream c _ _ => c
   | _ => 0
-  end.
+  end. *)
 
 Definition write' := cpu_write' ∪₁ fpga_write'.
 
-Definition enabled st tid := exists st', TSOFPGA_step st (CpuFlush tid) st'. 
+Definition enabled_cpu st tid := exists st', TSOFPGA_step st (CpuFlush tid) st'. 
 Definition TSO_fair tr st :=
   forall i tid
     (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
-    (ENABLED: enabled (st i) tid),
+    (ENABLED: enabled_cpu (st i) tid),
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = CpuFlush tid.
 
 
+Definition enabled_mem_flush st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemFlush chan loc val meta) st'.
+Definition mem_flush_fair tr st :=
+  forall i chan loc val meta
+    (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
+    (ENABLED: enabled_mem_flush (st i) chan loc val meta),
+  exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
+       trace_nth j tr def_lbl = FpgaMemFlush chan loc val meta.
+
+Definition enabled_readpool st chan loc meta := exists st', TSOFPGA_step st (FpgaReadToUpstream chan loc meta) st'.
+Definition readpool_fair tr st :=
+  forall i chan loc meta
+    (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
+    (ENABLED: enabled_readpool (st i) chan loc meta),
+  exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
+       trace_nth j tr def_lbl = FpgaReadToUpstream chan loc meta.
+
+Definition enabled_writepool st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemRead chan loc val meta) st'.
+Definition writepool_fair tr st :=
+  forall i chan loc val meta
+    (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
+    (ENABLED: enabled_writepool (st i) chan loc val meta),
+  exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
+       trace_nth j tr def_lbl = FpgaMemRead chan loc val meta.
+
+Definition fpga_up_prop := fpga_read_ups' ∪₁ fpga_write'.
+Definition fpga_any_mem_prop := fpga_mem_read' ∪₁ is_fpga_prop.
 
 End TSOFPGA.
 
-Ltac unfolder' := unfold set_compl, cross_rel, write', cpu_write', cpu_read', fpga_write', fpga_read_ups', fpga_read_req', fpga_write_req', fpga_read_resp', fpga_mem_read', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_r, is_w, is_resp, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
+Ltac unfolder' := unfold set_compl, cross_rel, fpga_up_prop, fpga_any_mem_prop, write', cpu_write', cpu_read', fpga_write', fpga_read_ups', fpga_read_req', fpga_write_req', fpga_read_resp', fpga_mem_read', is_cpu_wr, set_minus, set_inter, set_union, is_init, is_prop, is_fpga_prop, is_cpu_prop, def_lbl, in_cpu_thread, lbl_thread, same_loc, loc, tid, is_req, is_rd_req, is_r, is_w, is_resp, is_rd_resp, is_wr_req, is_wr_resp, is_fence_req_one, is_fence_resp_one, is_fence_req_all, is_fence_resp_all, req_resp_pair in *.
 
 Section TSOFPGA_Facts.
 

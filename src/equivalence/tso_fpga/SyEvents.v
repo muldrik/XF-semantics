@@ -26,23 +26,23 @@ Inductive Event :=
   | FpgaEvent (e: FPGAEvent) (index: nat) (m: Mdata)
   | InitEvent (x : SyLabels.Loc).
 
-Definition fpga_chan (e: FPGAEvent) : Chan :=
+Definition fpga_chan_opt (e: FPGAEvent) :=
   match e with
-  | Fpga_write_req c _ _ => c
-  | Fpga_read_req c _ => c
-  | Fpga_fence_req_one c => c
-  | Fpga_fence_req_all => 0
-  | Fpga_write_resp c _ _ => c
-  | Fpga_read_resp c _ _ => c
-  | Fpga_fence_resp_one c => c
-  | Fpga_fence_resp_all => 0
+  | Fpga_write_req c _ _ => Some c
+  | Fpga_read_req c _ => Some c
+  | Fpga_fence_req_one c => Some c
+  | Fpga_write_resp c _ _ => Some c
+  | Fpga_read_resp c _ _ => Some c
+  | Fpga_fence_resp_one c => Some c
+  | Fpga_fence_req_all => None
+  | Fpga_fence_resp_all => None
   end.
 
-Definition chan (e: Event) : Chan :=
+Definition chan_opt (e: Event) :=
   match e with
-  | ThreadEvent _ _ _ => 0
-  | FpgaEvent e _ _ => fpga_chan e
-  | InitEvent _ => 0
+  | ThreadEvent _ _ _ => None
+  | FpgaEvent e _ _ => fpga_chan_opt e
+  | InitEvent _ => None
 end.
 
 Definition tid (e: Event) : Tid :=
