@@ -128,7 +128,7 @@ Definition sb := ⦗E⦘ ⨾ ext_sb ⨾ ⦗E⦘.
 Definition poloc := sb ∩ same_loc.
 Definition poch := sb ∩ same_ch.
 Definition fr := rf⁻¹ ⨾ co \ ⦗fun _ => True⦘.
-Definition fr' := (⦗R⦘ ⨾ same_loc ⨾ ⦗W⦘) \ (rf⁻¹ ⨾ (co⁻¹)^*).
+Definition fr' := (⦗R ∩₁ E⦘ ⨾ same_loc ⨾ ⦗W ∩₁ E⦘) \ (rf⁻¹ ⨾ (co⁻¹)^*).
 
 Definition minus_event (A B: Event -> Prop) := fun a => A a /\ ~ B a.
 Notation "'E' \ 'RdRsp'" := (minus_event E RdRsp).
@@ -179,6 +179,7 @@ Record Wf :=
     wf_rfD : rf ≡ ⦗W⦘ ⨾ rf ⨾ ⦗R⦘ ;
     wf_rfl : rf ⊆ same_loc ;
     wf_rfv : forall w r (RF: rf w r), valw w = valr r ;
+    wf_rf_complete : E ∩₁ R ⊆₁ codom_rel rf ;
     wf_rff : functional rf⁻¹ ;
     wf_coE : co ≡ ⦗E⦘ ⨾ co ⨾ ⦗E⦘ ;
     wf_coD : co ≡ ⦗W⦘ ⨾ co ⨾ ⦗W⦘ ;
@@ -304,7 +305,7 @@ Hint Immediate loceq_rf loceq_co : core.
 
 Lemma loceq_fr WF : funeq loc fr.
 Proof using.
-  eauto with hahn.
+ eauto with hahn.
 Qed.
 
 Lemma loceq_rfr WF : funeq loc rfr.
@@ -312,13 +313,98 @@ Proof using.
   eauto with hahn.
 Qed.
 
+Lemma fr_fr' WF : fr ≡ fr'.
+Proof.
+  split.
+  { red; ins.
+    unfold fr, fr' in *.
+    destruct H.
+    repeat destruct H.
+    red; splits.
+    { red in H.
+      (* remember (wf_rfl WF x0 x H).
+      remember (wf_col WF x0 y H1). *)
+      apply seq_eqv_lr.
+      remember (loceq_rf WF x0 x H).
+      remember (loceq_co WF x0 y H1).
+      clear Heqe Heqe0.
+      destruct WF.
+      remember H as H'; clear HeqH'.
+      apply wf_rfE0 in H.
+      apply wf_rfD0 in H'.
+      remember H1 as H1'; clear HeqH1'.
+      apply wf_coE0 in H1.
+      apply wf_coD0 in H1'.
+      apply seq_eqv_lr in H, H1, H', H1'.
+      splits; desf.
+      red; lia. }
+    red; ins.
+    repeat destruct H2.
+    red in H, H2.
+    replace x1 with x0 in *.
+    2: { fold (rf⁻¹ x x0) in H.
+        fold (rf⁻¹ x x1) in H2.
+        exact (wf_rff WF x x0 x1 H H2). }
+    assert ((co⁻¹) x0 y).
+    { destruct WF. 
+      apply rt_of_trans in H3; vauto.
+      2: { apply transitive_transp; basic_solver. }
+      destruct H3.
+      { subst. basic_solver. }
+      auto. }
+    red in H4.
+    assert (antisymmetric co) by (apply trans_irr_antisymmetric; destruct WF; basic_solver).
+    red in H5.
+    remember (H5 x0 y H1 H4).
+    destruct WF.
+    subst.
+    basic_solver. } 
+  red; ins.
+  red; red in H.
+  red; destruct H.
+  splits.
+  2: { intro; red in H1; desf; subst; apply seq_eqv_lr in H. desf. red in H, H3; desf. red in H, H3; desf. }
+  apply seq_eqv_lr in H.
+  red in H0.
+  destruct WF.
+  assert (exists w, rf w x).
+  { apply wf_rf_complete0. red; desf. cbv in *; desf. }
+  desf.
+  cut (co w y \/ (co⁻¹)＊ w y).
+  2: { red in H2.
+       cut (w = y \/ w <> y); [|by tauto].
+       intro OR; destruct OR; [right; subst; apply rt_refl|].
+       remember (wf_co_total0 (loc y)) as COT.
+       forward eapply (COT w _ y _); auto.
+       Unshelve.
+       2: { assert (rf w x) as H1'; auto.
+            apply wf_rfD0 in H1.
+            apply wf_rfE0 in H1'.
+            apply seq_eqv_lr in H1, H1'.
+            split; desf.
+            rewrite <- H2.
+            destruct (wf_rfl0 w x H5); auto.
+        }
+       2: { destruct H3; split; desf. }
+       ins; desf; auto.
+       right.
+       apply rt_step.
+       auto.
+   }
+  ins.
+  destruct H4.
+  { red. exists w. splits; vauto. }
+  exfalso; apply H0.
+  red. exists w; splits; auto.
+Qed.
+
+
 
 Lemma wf_frl WF : fr ⊆ same_loc.
 Proof using.
-  unfold fr.
-  rewrite (wf_rfl WF), (wf_col WF).
-  unfold SyEvents.same_loc.
-  unfolder; ins; desc; congruence.
+  red; ins.
+  remember (loceq_fr WF H).
+  unfold same_loc. exact e.
 Qed.
 
 Lemma wf_rfrl WF : rfr ⊆ same_loc.
@@ -814,10 +900,9 @@ Proof using.
 Qed.
 
 
-Lemma has_finite_antichains_sb WF (B: bounded_threads) :
+(* Lemma has_finite_antichains_sb WF (B: bounded_threads) :
   has_finite_antichains (E \₁ is_init) (⦗set_compl is_init⦘ ⨾ sb).
 Proof using.
-  Admitted.
   (* destruct B as [n THR]; exists n; red; ins; unfolder in *.
   cut (exists a b, a <> b /\ In a l /\ In b l /\ tid a = tid b).
   { intro X; desc.
@@ -841,7 +926,7 @@ Proof using.
 Qed.
 *)
 
-Hint Resolve has_finite_antichains_sb : core.
+(* Hint Resolve has_finite_antichains_sb : core. *)
 
 (* Lemma countable_ninit WF : countable (E \₁ is_init).
 Proof using.
@@ -880,7 +965,7 @@ Proof using.
   unfolder; split; ins.
   intro NINIT; rewrite enumeratesE in X; desc.
   eapply RNG in LTi; unfolder in LTi; desf.
-Qed. *)
+Qed. *) *)
 
 
 (******************************************************************************)
@@ -994,7 +1079,7 @@ Tactic Notation "ie_unfolder" :=  repeat autounfold with ie_unfolderDb in *.
 (** ** Execution prefixes *)
 (******************************************************************************)
 
-Definition sub_execution G G' :=
+(* Definition sub_execution G G' :=
   ⟪SUBev: acts G ⊆₁ acts G' ⟫ /\
   ⟪SUBrf: rf G ≡ rf G' ⨾ ⦗acts G⦘ ⟫ /\
   ⟪SUBco: co G ≡ ⦗acts G⦘ ⨾ co G' ⨾ ⦗acts G⦘ ⟫ /\
@@ -1021,6 +1106,7 @@ Proof using.
     rewrite wf_rfD0 at 1; clear; basic_solver. }
   { rewrite SUBrf, wf_rfl0 at 1; clear; basic_solver. }
   { apply SUBrf in RF; revert RF; basic_solver. }
+  { rewrite SUBrf. rewrite SUBev. basic_solver. }
   { rewrite SUBrf; basic_solver. }
   { rewrite SUBco; basic_solver. }
   { rewrite SUBco; rewrite wf_coD0 at 1; clear; basic_solver. }
@@ -1074,7 +1160,7 @@ Proof using SE.
 Qed.
 
 
-End SubExecution.
+End SubExecution. *)
 
 (******************************************************************************)
 (** ** Execution prefix by event enumeration *)
@@ -1224,7 +1310,4 @@ Proof.
   cut (fr G y z); [basic_solver| ]. red. split.
   2: { unfolder. red. ins. desc. subst. eapply co_irr; eauto. }
   exists x. split; auto. 
-Qed. 
-
-
-End SyExecution. *)
+Qed. *)
