@@ -15,7 +15,7 @@ From hahn Require Import Hahn.
 Section CounterExample.
 
 (* Definition winit := InitEvent(0). *)
-Definition w1 := FpgaEvent (Fpga_write_req 1 0 1) 0 0.
+(* Definition w1 := FpgaEvent (Fpga_write_req 1 0 1) 0 0.
 Definition f1 := FpgaEvent (Fpga_fence_req_one 1) 1 1.
 Definition f2 := FpgaEvent (Fpga_fence_req_one 2) 2 2.
 Definition w2 := FpgaEvent (Fpga_write_req 2 0 2) 3 3.
@@ -452,6 +452,6 @@ Proof.
       unfold w2, f2 in *; desf.
       unfold EG in H5; simpl in *; desf.
       unfold w2_resp in *; desf. lia. }
-Qed.
+Qed. *)
 
 End CounterExample.

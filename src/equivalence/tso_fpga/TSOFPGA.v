@@ -215,21 +215,21 @@ Definition is_req e := match e with
 Definition is_pair :=
   same_meta_l ∩ (clos_sym req_resp_pair). *)
 
+Definition def_lbl: SyLabel := EventLab (InitEvent 0). 
 
 (* Если два запроса имеют одну мету, то либо это один и тот же, либо они образуют пару *)
 Definition FPGA_trace_pair_unique_wf (t: trace SyLabel) :=
-  forall i j d index1 index2 fpgaE1 fpgaE2 meta
-    (LTij: index1 < index2)
+  forall i j index1 index2 fpgaE1 fpgaE2 meta
+    (LTij: i < j)
     (LTj : NOmega.lt_nat_l j (trace_length t))
-    (TR_I: trace_nth i t d = EventLab (FpgaEvent fpgaE1 index1 meta))
-    (TR_J: trace_nth j t d = EventLab (FpgaEvent fpgaE2 index2 meta)),
+    (TR_I: trace_nth i t def_lbl = EventLab (FpgaEvent fpgaE1 index1 meta))
+    (TR_J: trace_nth j t def_lbl = EventLab (FpgaEvent fpgaE2 index2 meta)),
     req_resp_pair (FpgaEvent fpgaE1 index1 meta) (FpgaEvent fpgaE2 index2 meta).
 
-Definition def_lbl: SyLabel := EventLab (InitEvent 0). 
 
 Definition FPGA_trace_read_req_wf (t: trace SyLabel) :=
-  forall lbl i chan loc meta d
-    (TR_I: trace_nth i t d = lbl)
+  forall lbl i chan loc meta
+    (TR_I: trace_nth i t def_lbl = lbl)
     (IS_REQ: lbl = EventLab (FpgaEvent (Fpga_read_req chan loc) i meta)),
   exists j lbl2, i < j /\ (NOmega.lt_nat_l j (trace_length t)) /\
     trace_nth j t def_lbl = lbl2 /\ 

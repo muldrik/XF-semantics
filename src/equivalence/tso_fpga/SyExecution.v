@@ -179,7 +179,7 @@ Record Wf :=
     wf_rfD : rf ≡ ⦗W⦘ ⨾ rf ⨾ ⦗R⦘ ;
     wf_rfl : rf ⊆ same_loc ;
     wf_rfv : forall w r (RF: rf w r), valw w = valr r ;
-    wf_rf_complete : E ∩₁ R ⊆₁ codom_rel rf ;
+    (* wf_rf_complete : E ∩₁ R ⊆₁ codom_rel rf ; *)
     wf_rff : functional rf⁻¹ ;
     wf_coE : co ≡ ⦗E⦘ ⨾ co ⨾ ⦗E⦘ ;
     wf_coD : co ≡ ⦗W⦘ ⨾ co ⨾ ⦗W⦘ ;
@@ -313,7 +313,7 @@ Proof using.
   eauto with hahn.
 Qed.
 
-Lemma fr_fr' WF : fr ≡ fr'.
+(* Lemma fr_fr' WF : fr ≡ fr'.
 Proof.
   split.
   { red; ins.
@@ -396,7 +396,7 @@ Proof.
   { red. exists w. splits; vauto. }
   exfalso; apply H0.
   red. exists w; splits; auto.
-Qed.
+Qed. *)
 
 
 

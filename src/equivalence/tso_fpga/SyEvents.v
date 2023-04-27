@@ -231,7 +231,7 @@ end.
 
 Definition req_resp_pair (e1 e2: Event) :=
   match e1, e2 with
-  | FpgaEvent (Fpga_write_req chan1 _ _) _ meta1, FpgaEvent (Fpga_write_resp _ _ chan2) _ meta2 => chan1 = chan2 /\ meta1 = meta2
+  | FpgaEvent (Fpga_write_req chan1 _ _) _ meta1, FpgaEvent (Fpga_write_resp chan2 _ _) _ meta2 => chan1 = chan2 /\ meta1 = meta2
   | FpgaEvent (Fpga_read_req chan1 _) _ meta1, FpgaEvent (Fpga_read_resp chan2 _ _) _ meta2 => chan1 = chan2 /\ meta1 = meta2
   | FpgaEvent (Fpga_fence_req_one chan1) _ meta1, FpgaEvent (Fpga_fence_resp_one chan2) _ meta2 => chan1 = chan2 /\ meta1 = meta2
   | FpgaEvent (Fpga_fence_req_all) _ meta1, FpgaEvent (Fpga_fence_resp_all) _ meta2 => meta1 = meta2
