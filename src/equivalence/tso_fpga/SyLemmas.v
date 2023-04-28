@@ -6401,7 +6401,7 @@ Lemma write_fence_order_lemma i j ch meta_w meta_f (DOM_i: NOmega.lt_nat_l i (tr
   let wpool_j := w_pool (states j) in
   forall l v head mid tail head2 tail2
     (STRUCTURE_I: wpool_i = head ++ (store_wp ch l v, meta_w) :: mid ++ (fence_ch_wp ch, meta_f) :: tail)
-    (STRUCTURE_J: wpool_j = head2 ++ (fence_ch_wp ch, meta_f) :: tail2),
+    (STRUCTURE_J: wpool_j = head2 ++ (store_wp ch l v, meta_w) :: tail2),
   exists head2' mid2 tail2',
     ⟪STRUCTURE_J': wpool_j = head2' ++ (store_wp ch l v, meta_w) :: mid2 ++ (fence_ch_wp ch, meta_f) :: tail2'⟫.
 Proof.
@@ -6455,9 +6455,13 @@ Proof.
       destruct IHj as [h2 [m2 [t2 res]]];
       rewrite <- H0 in *;
       exists h2, m2, t2; simpl in *; vauto).
-    { forward eapply (list_last_elem_lemma head2 (fence_ch_wp ch, meta_f) tail2 w_pool (store_wp channel loc val, meta)).
+    { destruct (classic ((store_wp channel loc val, meta) = (store_wp ch l v, meta_w))) as [EQ | NEQ'].
+      { rewrite EQ in *.
+       }
+    
+      forward eapply (list_last_elem_lemma head2 ((store_wp ch l v, meta_w)) tail2 w_pool (store_wp channel loc val, meta)).
       { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
-      { vauto. }
+      { auto. }
       ins; desc.
       specialize IHj with (head2 := head2) (tail2 := tail' ++ (store_wp channel loc val, meta) :: nil).
       specialize_full IHj; eauto; vauto. 
@@ -6470,25 +6474,11 @@ Proof.
       rewrite res.
       repeat rewrite app_comm_cons.
       repeat rewrite appA. auto. }
-    
-     {
-      destruct (classic ((fence_ch_wp ch, meta_f) = (fence_ch_wp channel, meta))) as [EQ | NEQ'].
-      {
-        rewrite EQ in *; clear EQ.
-        rewrite <- H0, <- H2 in *; simpl in *; vauto. 
-        forward eapply (NoDup_eq_simpl w_pool (fence_ch_wp channel, meta) nil head2 tail2); vauto.
-        ins; desf.
-        forward eapply (write_pool_sources (fence_ch_wp channel) meta i); vauto.
-        { rewrite STRUCTURE_I. apply in_app_r. simpl; right. apply in_app_r. simpl; left; auto. }
-        ins; desc.
-        destruct WF; red in PAIR_UNIQUE.
-        exfalso; enough (req_resp_pair (FpgaEvent (Fpga_fence_req_one channel) event_ind meta) (FpgaEvent (Fpga_fence_req_one channel) index meta)).
-        { red in H1; desf. }
-        eapply PAIR_UNIQUE with (i := j0) (j := j); eauto.
-        lia. }
 
-      forward eapply (list_last_elem_lemma head2 (fence_ch_wp ch, meta_f) tail2 w_pool (fence_ch_wp channel, meta)); auto.
+     {
+      forward eapply (list_last_elem_lemma head2 (store_wp ch l v, meta_w) tail2 w_pool (fence_ch_wp channel, meta)); auto.
       { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
+      { desf. }
       ins; desc.
       specialize IHj with (head2 := head2) (tail2 := tail' ++ (fence_ch_wp channel, meta) :: nil).
       specialize_full IHj; eauto; vauto.
@@ -6501,7 +6491,7 @@ Proof.
       rewrite res.
       repeat rewrite app_comm_cons.
       repeat rewrite appA. auto. }
-    { forward eapply (list_last_elem_lemma head2 (fence_ch_wp ch, meta_f) tail2 w_pool (fence_all_wp, meta)).
+    { forward eapply (list_last_elem_lemma head2 (store_wp ch l v, meta_w) tail2 w_pool (fence_all_wp, meta)).
       { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
       ins; desc.
       ins; desc.
@@ -6516,7 +6506,9 @@ Proof.
       rewrite res.
       repeat rewrite app_comm_cons.
       repeat rewrite appA. auto. }
-    { assert (In (fence_ch_wp ch, meta_f) head0 \/ In (fence_ch_wp ch, meta_f) tail0).
+    {  
+    
+      assert (In (fence_ch_wp ch, meta_f) head0 \/ In (fence_ch_wp ch, meta_f) tail0).
       { cut (In (fence_ch_wp ch, meta_f) (TSOFPGA.w_pool (states (S j)))).
         2: { rewrite STRUCTURE_J; apply in_app_r. simpl; left; auto. }
         intro IN; rewrite <- H2 in IN; simpl in *.
@@ -6736,6 +6728,10 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { red in PAIR2; unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf. }
   replace meta0 with meta in *.
   2: { red in PAIR01; desf. }
+  (* утверждения:
+    был порядок write->fence
+    остался порядок write->fence
+  *)
   (* rewrite WRITE_POOL. *)
 
   forward eapply (write_fence_order_lemma (S (trace_index x0)) (trace_index x1)) with
