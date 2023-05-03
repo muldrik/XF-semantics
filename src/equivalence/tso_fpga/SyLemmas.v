@@ -6317,7 +6317,6 @@ Proof.
     destruct WF.
     red in PAIR_UNIQUE.
     (* forward eapply (PAIR_UNIQUE j i event_ind index _ _ meta); eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. _ _ meta).; eauto; vauto. *)
-
    }
    Admitted.
 
@@ -6618,19 +6617,6 @@ Proof.
     { desf. }
     desf.
 Qed.
-  
-(* Lemma fence_in_buffer f_req f_resp ch
-  (CHAN: chan_opt f_req = Some ch)
-  (EG1: EG f_req)
-  (EG2: EG f_resp)
-  (FREQ: is_fence_req_one f_req)
-  (FRESP: is_fence_resp_one f_resp)
-  (PAIR: req_resp_pair f_req f_resp)
-  :
-  forall j, j > trace_index f_req /\ j <= trace_index f_resp ->
-  exists pos, nth_error (w_pool (states j)) pos = Some (fence_ch_wp ch, (meta f_req)).
-Proof.
-  Admitted. *)
 
 Lemma sb_in_tb e1 e2 (EN1: Eninit e1) (EN2: Eninit e2): 
   sb G e1 e2 -> trace_index e1 < trace_index e2.
@@ -6645,23 +6631,31 @@ Proof.
   red in TB; auto.
 Qed.
 
-Lemma write_in_buffer w_req w_resp ch
-  (CHAN: chan_opt w_req = Some ch)
-  (EG1: EG w_req)
-  (EG2: EG w_resp)
-  (WREQ: is_wr_req w_req)
-  (WRESP: is_wr_resp w_resp)
-  (PAIR: req_resp_pair w_req w_resp):
+
+Definition wp_entry_by_req req := match req with
+  | FpgaEvent (Fpga_write_req ch l v) _ meta => ((store_wp ch l v), meta)
+  | FpgaEvent (Fpga_fence_req_one ch) _ meta => ((fence_ch_wp ch), meta)
+  | FpgaEvent (Fpga_fence_req_all) _ meta => ((fence_all_wp), meta)
+  | _ => ((store_wp 0 0 0), 0)
+  end.
+
+Lemma req_in_write_buffer_until_resp req resp
+  (NOT_READ: ~is_rd_req req)
+  (EG1: EG req)
+  (EG2: EG resp)
+  (WREQ: is_req req)
+  (WRESP: is_resp resp)
+  (PAIR: req_resp_pair req resp):
   forall trace_pos
-  (AFTER_REQ: trace_pos > trace_index w_req)
-  (BEFORE_RESP: trace_pos <= trace_index w_resp),
-  exists head tail, w_pool (states trace_pos) = head ++ (store_wp ch (loc w_req) (valw w_req), (meta w_req)) :: tail.
+  (AFTER_REQ: trace_pos > trace_index req)
+  (BEFORE_RESP: trace_pos <= trace_index resp),
+  exists head tail, w_pool (states trace_pos) = head ++ (wp_entry_by_req req) :: tail.
 Proof.
   ins.
   induction trace_pos; [lia|].
-  assert (NOmega.lt_nat_l (trace_index w_resp) (trace_length tr)) as DOM.
+  assert (NOmega.lt_nat_l (trace_index resp) (trace_length tr)) as DOM.
   { apply Eninit_in_trace; destruct EG2; unfolder'; desf. }
-  assert (trace_pos > trace_index w_req \/ trace_pos = trace_index w_req) as OR by lia.
+  assert (trace_pos > trace_index req \/ trace_pos = trace_index req) as OR by lia.
   destruct OR as [GE | EQ].
   { forward eapply (TSi trace_pos) with (d := def_lbl) as TSi.
     { eapply NOmega.lt_lt_nat; eauto. }
@@ -6683,51 +6677,106 @@ Proof.
       rewrite appA; auto. }
     2: { rewrite <- H0, <- H2 in *; simpl in *.
       rewrite IHtrace_pos in WRITE_POOL.
+      destruct (classic ((fence_ch_wp channel, meta) = (wp_entry_by_req req))).
+      { destruct req; desf.
+        destruct e; desf.
+        destruct resp; desf.
+        destruct e; desf.
+        red in PAIR; desc; desf.
+        destruct head.
+        2: { rewrite <- app_comm_cons in WRITE_POOL.
+             vauto. }
+        simpl in *; desf. 
+        exfalso.
+        enough (req_resp_pair 
+          (FpgaEvent (Fpga_fence_resp_one c0) index m0)
+          (FpgaEvent (Fpga_fence_resp_one c0) index1 m0)); vauto.
+        destruct WF.
+        red in PAIR_UNIQUE.
+        eapply PAIR_UNIQUE with (i := trace_pos) (j := trace_index ((FpgaEvent (Fpga_fence_resp_one c0) index1 m0))); eauto.
+        rewrite trace_index_simpl; vauto.
+        destruct EG2; desf. }
       destruct head; vauto.
+      { simpl in *; desf. symmetry in H5; vauto. }
       exists head, tail.
       rewrite <- app_comm_cons in WRITE_POOL.
       vauto. }
+
     2: { rewrite <- H0, <- H2 in *; simpl in *.
       rewrite IHtrace_pos in WRITE_POOL.
+      destruct (classic ((fence_all_wp, meta) = (wp_entry_by_req req))).
+      { destruct req; desf.
+        destruct e; desf.
+        destruct resp; desf.
+        destruct e; desf.
+        red in PAIR; desc; desf.
+        destruct head.
+        2: { rewrite <- app_comm_cons in WRITE_POOL.
+             vauto. }
+        simpl in *; desf. 
+        exfalso.
+        enough (req_resp_pair 
+          (FpgaEvent (Fpga_fence_resp_all) index m0)
+          (FpgaEvent (Fpga_fence_resp_all) index1 m0)); vauto.
+        destruct WF.
+        red in PAIR_UNIQUE.
+        eapply PAIR_UNIQUE with (i := trace_pos) (j := trace_index ((FpgaEvent (Fpga_fence_resp_all) index1 m0))); eauto.
+        rewrite trace_index_simpl; vauto.
+        destruct EG2; desf. }
       destruct head; vauto.
+      { simpl in *; desf. symmetry in H5; vauto. }
       exists head, tail.
       rewrite <- app_comm_cons in WRITE_POOL.
       vauto. }
     assert (NoDup (TSOFPGA.w_pool (states trace_pos))). { eapply write_pool_nodup; eapply NOmega.lt_lt_nat; eauto. } 
     rewrite <- H0, <- H2 in *; simpl in *.
-    assert ((store_wp channel loc val, meta) <> (store_wp ch (SyEvents.loc w_req) (valw w_req), SyEvents.meta w_req)) as NEQ.
+    assert ((store_wp channel loc val, meta) <> (wp_entry_by_req req) ) as NEQ.
     { intro.
-      destruct w_req; desf; simpl in *.
-      forward eapply (SyLemmas.TSi (trace_index w_resp)) with (d := def_lbl) as TSi2; auto.
-      inversion TSi2.
-      all: try by (rewrite trace_index_simpl in *; destruct EG2; unfolder'; desf ).
-      rewrite trace_index_simpl in H5; [|destruct EG2; unfolder'; desf].
-      replace meta with m in * by desf.
-      assert (Eninit (FpgaEvent (Fpga_write_resp channel loc val) index1 m)) by (vauto; destruct EG2; unfolder'; desf).
-      fold (trace_labels trace_pos) in H.
-      rewrite trace_index_simpl in *.
-      2: { destruct EG2; unfolder'; desf. }
-      forward eapply (write_resp_meta_unique (trace_index w_resp) trace_pos); vauto.
-      { eapply NOmega.lt_lt_nat; eauto. }
-      { rewrite trace_index_simpl'; vauto. }
-      { rewrite <- H. destruct EG1; unfolder'; desf. }
-      { rewrite <- H. rewrite trace_index_simpl'; vauto; destruct EG2; unfolder'; desf. }
-      intro SAME_TRACE.
-      lia.
-    }
-    eapply list_single_structure_lemma; eauto.    
-  }
+      destruct req; desf; simpl in *.
+      destruct e; desf; simpl in *.
+      desc; desf.
+      enough (req_resp_pair (FpgaEvent (Fpga_write_resp c0 x0 v0) index m0) (FpgaEvent (Fpga_write_resp c0 x0 v0) index1 m0)); vauto.
+      destruct WF.
+      red in PAIR_UNIQUE.
+      eapply PAIR_UNIQUE with (i := trace_pos) (j := trace_index (FpgaEvent (Fpga_write_resp c0 x0 v0) index1 m0)); eauto.
+      eapply trace_index_simpl; vauto.
+      destruct EG2; desf. }
+      eapply list_single_structure_lemma; eauto. }
   rewrite EQ in *; clear EQ.
-  forward eapply (TSi (trace_index w_req)) with (d := def_lbl) as TSi.
+  forward eapply (TSi (trace_index req)) with (d := def_lbl) as TSi.
   { eapply NOmega.lt_lt_nat; eauto. }
   inversion TSi.
   all: try by (rewrite trace_index_simpl in *; destruct EG1; unfolder'; desf ).
+  { exists w_pool, nil; simpl.
+    rewrite trace_index_simpl in H.
+    2: { destruct EG1; unfolder'; desf. }
+    destruct req; desf. }
+  { exists w_pool, nil; simpl.
+    rewrite trace_index_simpl in H.
+    2: { destruct EG1; unfolder'; desf. }
+    destruct req; desf. }
   exists w_pool, nil; simpl.
   rewrite trace_index_simpl in H.
   2: { destruct EG1; unfolder'; desf. }
-  destruct w_req; desf. simpl.
-  replace ch with channel; vauto.
-  unfold chan_opt, fpga_chan_opt in CHAN; desf.
+  destruct req; desf.
+Qed.
+
+Lemma write_in_buffer w_req w_resp ch
+  (CHAN: chan_opt w_req = Some ch)
+  (EG1: EG w_req)
+  (EG2: EG w_resp)
+  (WREQ: is_wr_req w_req)
+  (WRESP: is_wr_resp w_resp)
+  (PAIR: req_resp_pair w_req w_resp):
+  forall trace_pos
+  (AFTER_REQ: trace_pos > trace_index w_req)
+  (BEFORE_RESP: trace_pos <= trace_index w_resp),
+  exists head tail, w_pool (states trace_pos) = head ++ (store_wp ch (loc w_req) (valw w_req), (meta w_req)) :: tail.
+Proof.
+  replace (store_wp ch (loc w_req) (valw w_req), meta w_req) with (wp_entry_by_req w_req) in *.
+  2: { destruct w_req; desf. destruct e; desf. simpl; unfold chan_opt, fpga_chan_opt in *; desf. }
+  eapply req_in_write_buffer_until_resp; eauto.
+  all: try (unfolder'; desf).
 Qed.
 
 Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (writepair G)⁻¹ ).
@@ -7214,7 +7263,6 @@ Lemma fence_write_order_lemma i j ch meta_w meta_f (DOM_i: NOmega.lt_nat_l i (tr
 Proof.
   induction j.
   { replace i with 0 in * by lia. destruct TS0; ins. destruct head; desf. }
-  (* induction j; [lia|]. *)
   ins.
   assert (NOmega.lt_nat_l j (trace_length tr)) as DOM'.
   { eapply (@NOmega.lt_lt_nat j (S j)); eauto. }
@@ -7235,11 +7283,6 @@ Proof.
     { rewrite STRUCTURE_I in *.
       exists head, mid, (tail ++ (fence_all_wp, meta) :: nil).
       rewrite <- app_assoc. simpl. rewrite <- app_assoc. simpl. auto. }
-
-    (* { rewrite STRUCTURE_I in *.
-      destruct head; [desf|].
-      rewrite <- app_comm_cons in WRITE_POOL.
-      exists head, mid, tail; desf. } *)
 
     { simpl in *. rewrite WRITE_POOL in *.
       eapply list_double_structure_lemma; eauto.
@@ -7290,36 +7333,6 @@ Proof.
       destruct IHj as [h2 [m2 [t2 res]]];
       rewrite <- H0 in *;
       exists h2, m2, t2; simpl in *; vauto).
-    (* { destruct (classic ((store_wp channel loc val, meta) = (store_wp ch l v, meta_w))) as [EQ | NEQ'].
-      { 
-        rewrite <- EQ in *; clear EQ.
-        rewrite <- H0, <- H2 in *; simpl in *; vauto. 
-        forward eapply (NoDup_eq_simpl w_pool (store_wp channel loc val, meta) nil head2 tail2); vauto.
-        ins; desf.
-        forward eapply (write_pool_sources (store_wp channel loc val) meta i); vauto.
-        { rewrite STRUCTURE_I. apply in_app_r. simpl; left; auto. }
-        ins; desc.
-        destruct WF; red in PAIR_UNIQUE.
-        exfalso; enough (req_resp_pair (FpgaEvent (Fpga_write_req channel loc val) event_ind meta) (FpgaEvent (Fpga_write_req channel loc val) index meta)).
-        { red in H1; desf. }
-        eapply PAIR_UNIQUE with (i := j0) (j := j); eauto.
-        lia. }
-    
-      forward eapply (list_last_elem_lemma head2 ((store_wp ch l v, meta_w)) tail2 w_pool (store_wp channel loc val, meta)).
-      { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
-      { auto. }
-      ins; desc.
-      specialize IHj with (head2 := head2) (tail2 := tail' ++ (store_wp channel loc val, meta) :: nil).
-      specialize_full IHj; eauto; vauto. 
-      { lia. }
-      { rewrite <- H0; simpl in *; vauto. }
-      destruct IHj as [h2 [m2 [t2 res]]];
-      rewrite <- H0 in *;
-      exists h2, m2, (t2 ++ (store_wp channel loc val, meta) :: nil); simpl in *.
-      vauto.
-      rewrite res.
-      repeat rewrite app_comm_cons.
-      repeat rewrite appA. auto. } *)
     { 
       forward eapply (list_last_elem_lemma head2 (fence_ch_wp ch, meta_f) tail2 w_pool (store_wp channel loc val, meta)); auto.
       { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
@@ -7375,21 +7388,9 @@ Proof.
       rewrite res.
       repeat rewrite app_comm_cons.
       repeat rewrite appA. auto. }
-
-    Admitted (* STOPPED HERE *)
-
     
-    { assert ((store_wp channel loc val, meta) <> (store_wp ch l v, meta_w)).
-      { intro EQ.
-        rewrite EQ in *.
-        forward eapply (NoDup_remove_2 head0 tail0 (store_wp ch l v, meta_w)); eauto.
-        { rewrite <- H0 in *; simpl in *. vauto. }
-        intro NIN; apply NIN.
-        rewrite <- H2 in STRUCTURE_J; simpl in *; rewrite STRUCTURE_J.
-        apply in_app_r; simpl; left; auto. }
-
-      assert (In (store_wp ch l v, meta_w) head0 \/ In (store_wp ch l v, meta_w) tail0) as OR.
-      { cut (In (store_wp ch l v, meta_w) (TSOFPGA.w_pool (states (S j)))).
+    {  assert (In (fence_ch_wp ch, meta_f) head0 \/ In (fence_ch_wp ch, meta_f) tail0) as OR.
+      { cut (In (fence_ch_wp ch, meta_f) (TSOFPGA.w_pool (states (S j)))).
         2: { rewrite STRUCTURE_J; apply in_app_r. simpl; left; auto. }
         intro IN; rewrite <- H2 in IN; simpl in *.
         apply in_app_or; auto. }
@@ -7402,11 +7403,21 @@ Proof.
         { lia. }
         { rewrite <- H0; simpl in *; vauto. rewrite appA. rewrite app_comm_cons; auto. }
         desc.
-        forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' head0 tail0 (store_wp ch l v, meta_w) (fence_ch_wp ch, meta_f) (store_wp channel loc val, meta)); eauto.
+        forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' head0 tail0 (fence_ch_wp ch, meta_f) (store_wp ch l v, meta_w) (store_wp channel loc val, meta)); eauto.
         { rewrite <- H0 in NODUP; simpl in *; auto. }
         { rewrite <- H0 in STRUCTURE_J'; desf. }
         { desf. }
-        desf. }
+        desf. 
+        intro EQ; rewrite EQ in *.
+        forward eapply (NoDup_eq_simpl head0 (store_wp channel loc val, meta) tail0 (head2' ++ (fence_ch_wp ch, meta_f) :: mid2) tail2').
+        { rewrite <- H0 in NODUP; vauto. }
+        { rewrite <- H0 in STRUCTURE_J'. simpl in *.
+          rewrite appA.
+          vauto. }
+        ins; desc.
+        rewrite H1 in *.
+        apply (NO_FENCE_ONE meta_f).
+        apply in_app_r; simpl; left; desf. }
 
       forward eapply in_split as SPLIT; eauto.
       destruct SPLIT as [l1 [l2 SPLIT]].
@@ -7416,15 +7427,24 @@ Proof.
       { lia. }
       { rewrite <- H0; simpl in *; vauto. rewrite appA. rewrite app_comm_cons; auto. }
       desc.
-      forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' head0 tail0 (store_wp ch l v, meta_w) (fence_ch_wp ch, meta_f) (store_wp channel loc val, meta)); eauto.
+      forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' head0 tail0 (fence_ch_wp ch, meta_f) (store_wp ch l v, meta_w) (store_wp channel loc val, meta)); eauto.
       { rewrite <- H0 in NODUP; simpl in *; auto. }
       { rewrite <- H0 in STRUCTURE_J'; desf. }
       { desf. }
-      desf. }
+      desf. 
+      intro EQ; rewrite EQ in *.
+      forward eapply (NoDup_eq_simpl head0 (store_wp channel loc val, meta) tail0 (head2' ++ (fence_ch_wp ch, meta_f) :: mid2) tail2').
+      { rewrite <- H0 in NODUP; vauto. }
+      { rewrite <- H0 in STRUCTURE_J'. simpl in *.
+        rewrite appA.
+        vauto. }
+      ins; desc.
+      rewrite H1 in *.
+      apply (NO_FENCE_ONE meta_f).
+      apply in_app_r; simpl; left; desf. }
 
-    (* These goals change in the future, when fence propagation is relaxed *)
     {
-      assert (In (store_wp ch l v, meta_w) w_pool').
+      assert (In (fence_ch_wp ch, meta_f) w_pool').
       { rewrite <- H2 in STRUCTURE_J; simpl in *. rewrite STRUCTURE_J. apply in_app_r. simpl. left. auto. }
 
       forward eapply in_split as SPLIT; eauto.
@@ -7435,29 +7455,16 @@ Proof.
       { lia. }
       { rewrite <- H0; simpl in *; vauto. }
       desc.
-      forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' (nil) w_pool' (store_wp ch l v, meta_w) (fence_ch_wp ch, meta_f) (fence_ch_wp channel, meta)); eauto.
+      forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' (nil) w_pool' (fence_ch_wp ch, meta_f) (store_wp ch l v, meta_w) (fence_ch_wp channel, meta)); eauto.
       { rewrite <- H0 in NODUP; simpl in *; auto. }
       { rewrite <- H0 in STRUCTURE_J'; desf. }
       { desf. }
-      { desf. }
+      2: desf.
       intro EQ; rewrite EQ in *.
       forward eapply (NoDup_remove_2 nil w_pool' (fence_ch_wp channel, meta)); eauto.
-      { simpl. rewrite <- H0 in NODUP; simpl in *; desf. }
-      intro NIN; apply NIN.
-      rewrite <- H0 in STRUCTURE_J'.
-      simpl in *.
-      rewrite WRITE_POOL in STRUCTURE_J'.
-      desf.
-      rewrite <- H2 in STRUCTURE_J; simpl in *.
-      destruct head2'; desf.
-      rewrite <- app_comm_cons in STRUCTURE_J'.
-      replace (l1 ++ (store_wp channel l v, meta_w) :: l2) with (head2' ++ (store_wp channel l v, meta_w) :: mid2 ++ (fence_ch_wp channel, meta) :: tail2') in * by desf.
-      apply in_app_r.
-      simpl; right.
-      apply in_app_r.
-      simpl; left; auto. }
+      simpl. rewrite <- H0 in NODUP; simpl in *; desf. }
 
-    assert (In (store_wp ch l v, meta_w) w_pool').
+    assert (In (fence_ch_wp ch, meta_f) w_pool').
     { rewrite <- H2 in STRUCTURE_J; simpl in *. rewrite STRUCTURE_J. apply in_app_r. simpl. left. auto. }
 
     forward eapply in_split as SPLIT; eauto.
@@ -7468,12 +7475,331 @@ Proof.
     { lia. }
     { rewrite <- H0; simpl in *; vauto. }
     desc.
-    forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' (nil) w_pool' (store_wp ch l v, meta_w) (fence_ch_wp ch, meta_f) (fence_all_wp, meta)); eauto.
+    forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' (nil) w_pool' (fence_ch_wp ch, meta_f) (store_wp ch l v, meta_w) (fence_all_wp, meta)); eauto.
     { rewrite <- H0 in NODUP; simpl in *; auto. }
     { rewrite <- H0 in STRUCTURE_J'; desf. }
     { desf. }
+    2: desf.
+    intro EQ; rewrite EQ in *.
+    forward eapply (NoDup_remove_2 nil w_pool' (fence_all_wp, meta)); eauto.
+    simpl. rewrite <- H0 in NODUP; simpl in *; desf.
+Qed.
+
+
+Lemma fence_all_write_order_lemma i j ch meta_w meta_f (DOM_i: NOmega.lt_nat_l i (trace_length tr))
+  (DOM_j: NOmega.lt_nat_l j (trace_length tr)) (TIMELINE: i <= j):
+  let wpool_i := w_pool (states i) in
+  let wpool_j := w_pool (states j) in
+  forall l v head mid tail head2 tail2
+    (STRUCTURE_I: wpool_i = head ++ (fence_all_wp, meta_f) :: mid ++ (store_wp ch l v, meta_w) :: tail)
+    (STRUCTURE_J: wpool_j = head2 ++ (fence_all_wp, meta_f) :: tail2),
+  exists head2' mid2 tail2',
+    ⟪STRUCTURE_J': wpool_j = head2' ++ (fence_all_wp, meta_f) :: mid2 ++ (store_wp ch l v, meta_w) :: tail2'⟫.
+Proof.
+  induction j.
+  { replace i with 0 in * by lia. destruct TS0; ins. destruct head; desf. }
+  ins.
+  assert (NOmega.lt_nat_l j (trace_length tr)) as DOM'.
+  { eapply (@NOmega.lt_lt_nat j (S j)); eauto. }
+  assert (i = (S j) \/ i = j \/ i < j) as H by lia.
+  destruct H as [LESS | [EQ | NEQ]].
+  { rewrite <- LESS in *. exists head, mid, tail; vauto.  }
+  { subst j.
+    assert (NoDup (TSOFPGA.w_pool (states i))) as NODUP.
+    { apply write_pool_nodup; vauto. }
+    forward eapply (TSi i) with (d := def_lbl) as TSi; auto.
+    inversion TSi.
+    all: (rewrite <- H2 in *; rewrite <- H0 in *; simpl in *).
+    all: try by (exists head, mid; vauto ).
+    { exists head, mid, (tail ++ (store_wp channel loc val, meta) :: nil).
+      rewrite STRUCTURE_I. rewrite <- app_assoc. simpl. rewrite <- app_assoc. simpl. auto. }
+    { exists head, mid, (tail ++ (fence_ch_wp channel, meta) :: nil).
+      rewrite STRUCTURE_I. rewrite <- app_assoc. simpl. rewrite <- app_assoc. simpl. auto. }
+    { rewrite STRUCTURE_I in *.
+      exists head, mid, (tail ++ (fence_all_wp, meta) :: nil).
+      rewrite <- app_assoc. simpl. rewrite <- app_assoc. simpl. auto. }
+
+    { simpl in *. rewrite WRITE_POOL in *.
+      eapply list_double_structure_lemma; eauto.
+      desf.
+      intro EQ; rewrite <- EQ in *.
+      replace channel with ch in * by desf.
+      apply (NO_FENCE_ALL meta_f).
+      forward eapply NoDup_eq_simpl with (l1 := head0) (l2 := (head ++ (fence_all_wp, meta_f) :: mid)) (l2' := tail); eauto.
+      { rewrite appA. rewrite <- app_comm_cons. vauto. }
+      intro HEQ. destruct HEQ as [HEQ _]; rewrite HEQ in *.
+      apply in_app_r; simpl; left; auto. }
+    2: { cut ((fence_all_wp, meta) <> (fence_all_wp, meta_f)).
+      { intro NEQ.
+        rewrite STRUCTURE_I in *.
+        destruct head.
+        { simpl in *; desf. }
+        replace p with (fence_all_wp, meta) in *.
+        2: { rewrite <- app_comm_cons in WRITE_POOL; desf. }
+        exists head, mid, tail.
+        rewrite <- app_comm_cons in WRITE_POOL.
+        desf. }
+      intro EQ.
+      rewrite EQ in *.
+      rewrite STRUCTURE_J in *.
+      rewrite WRITE_POOL in NODUP.
+      inversion NODUP; desf.
+      apply H4.
+      apply in_app_r; simpl; left; auto. }
+
+      rewrite STRUCTURE_I in *.
+      destruct head.
+      { simpl in *; desf. }
+      replace p with (fence_ch_wp channel, meta) in *.
+      2: { rewrite <- app_comm_cons in WRITE_POOL; desf. }
+      exists head, mid, tail.
+      rewrite <- app_comm_cons in WRITE_POOL.
+      desf. }
+
+    assert (NoDup (TSOFPGA.w_pool (states j))) as NODUP.
+    { apply write_pool_nodup; vauto. }
+    assert (NoDup (TSOFPGA.w_pool (states (S j)))) as NODUP'.
+    { apply write_pool_nodup; vauto. }
+    forward eapply (TSi j) with (d := def_lbl) as TSi; auto.
+    inversion TSi.
+    (* all: try by (  *)
+    all: try by (specialize IHj with (head2 := head2) (tail2 := tail2);
+      specialize_full IHj; eauto; vauto; [lia | rewrite <- STRUCTURE_J, <- H0, <- H2; vauto|];
+      destruct IHj as [h2 [m2 [t2 res]]];
+      rewrite <- H0 in *;
+      exists h2, m2, t2; simpl in *; vauto).
+    { 
+      forward eapply (list_last_elem_lemma head2 (fence_all_wp, meta_f) tail2 w_pool (store_wp channel loc val, meta)); auto.
+      { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
+      { desf. }
+      ins; desc.
+      specialize IHj with (head2 := head2) (tail2 := tail' ++ (store_wp channel loc val, meta) :: nil).
+      specialize_full IHj; eauto; vauto.
+      { lia. } 
+      { rewrite <- H0; simpl in *; vauto. }
+      destruct IHj as [h2 [m2 [t2 res]]];
+      rewrite <- H0 in *;
+      exists h2, m2, (t2 ++ (store_wp channel loc val, meta) :: nil); simpl in *.
+      vauto.
+      rewrite res.
+      repeat rewrite app_comm_cons.
+      repeat rewrite appA. auto. }
+     2: {
+      forward eapply (list_last_elem_lemma head2 (fence_all_wp, meta_f) tail2 w_pool (fence_all_wp, meta)); auto.
+      { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
+      { intro EQ; rewrite EQ in *.
+        forward eapply (write_pool_sources (fence_all_wp) meta i); vauto.
+        { rewrite STRUCTURE_I. apply in_app_r. simpl; left; auto. }
+        ins; desc.
+        destruct WF; red in PAIR_UNIQUE.
+        exfalso; enough (req_resp_pair (FpgaEvent (Fpga_fence_req_all) event_ind meta) (FpgaEvent (Fpga_fence_req_all) index meta)).
+        { red in H1; desf. }
+        eapply PAIR_UNIQUE with (i := j0) (j := j); eauto.
+        lia. }
+      ins; desc.
+      specialize IHj with (head2 := head2) (tail2 := tail' ++ (fence_all_wp, meta) :: nil).
+      specialize_full IHj; eauto; vauto.
+      { lia. } 
+      { rewrite <- H0; simpl in *; vauto. }
+      destruct IHj as [h2 [m2 [t2 res]]];
+      rewrite <- H0 in *;
+      exists h2, m2, (t2 ++ (fence_all_wp, meta) :: nil); simpl in *.
+      vauto.
+      rewrite res.
+      repeat rewrite app_comm_cons.
+      repeat rewrite appA. auto. }
+    { forward eapply (list_last_elem_lemma head2 (fence_all_wp, meta_f) tail2 w_pool (fence_ch_wp channel, meta)).
+      { rewrite <- H0, <- H2 in *; simpl in *. vauto. }
+      ins; desc.
+      ins; desc.
+      specialize IHj with (head2 := head2) (tail2 := tail' ++ (fence_ch_wp channel, meta) :: nil).
+      specialize_full IHj; eauto; vauto.
+      { lia. } 
+      { rewrite <- H0; simpl in *; vauto. }
+      destruct IHj as [h2 [m2 [t2 res]]];
+      rewrite <- H0 in *;
+      exists h2, m2, (t2 ++ (fence_ch_wp channel, meta) :: nil); simpl in *.
+      vauto.
+      rewrite res.
+      repeat rewrite app_comm_cons.
+      repeat rewrite appA. auto. }
+    
+    {  assert (In (fence_all_wp, meta_f) head0 \/ In (fence_all_wp, meta_f) tail0) as OR.
+      { cut (In (fence_all_wp, meta_f) (TSOFPGA.w_pool (states (S j)))).
+        2: { rewrite STRUCTURE_J; apply in_app_r. simpl; left; auto. }
+        intro IN; rewrite <- H2 in IN; simpl in *.
+        apply in_app_or; auto. }
+      destruct OR as [L | R].
+      { forward eapply in_split as SPLIT; eauto.
+        destruct SPLIT as [l1 [l2 SPLIT]].
+        rewrite SPLIT in WRITE_POOL.
+        specialize IHj with (head2 := l1) (tail2 := l2 ++ ((store_wp channel loc val, meta)) :: tail0).
+        specialize_full IHj; eauto.
+        { lia. }
+        { rewrite <- H0; simpl in *; vauto. rewrite appA. rewrite app_comm_cons; auto. }
+        desc.
+        forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' head0 tail0 (fence_all_wp, meta_f) (store_wp ch l v, meta_w) (store_wp channel loc val, meta)); eauto.
+        { rewrite <- H0 in NODUP; simpl in *; auto. }
+        { rewrite <- H0 in STRUCTURE_J'; desf. }
+        { desf. }
+        desf. 
+        intro EQ; rewrite EQ in *.
+        forward eapply (NoDup_eq_simpl head0 (store_wp channel loc val, meta) tail0 (head2' ++ (fence_all_wp, meta_f) :: mid2) tail2').
+        { rewrite <- H0 in NODUP; vauto. }
+        { rewrite <- H0 in STRUCTURE_J'. simpl in *.
+          rewrite appA.
+          vauto. }
+        ins; desc.
+        rewrite H1 in *.
+        apply (NO_FENCE_ALL meta_f).
+        apply in_app_r; simpl; left; desf. }
+
+      forward eapply in_split as SPLIT; eauto.
+      destruct SPLIT as [l1 [l2 SPLIT]].
+      rewrite SPLIT in WRITE_POOL.
+      specialize IHj with (head2 := head0 ++ (store_wp channel loc val, meta) :: l1) (tail2 := l2).
+      specialize_full IHj; eauto.
+      { lia. }
+      { rewrite <- H0; simpl in *; vauto. rewrite appA. rewrite app_comm_cons; auto. }
+      desc.
+      forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' head0 tail0 (fence_all_wp, meta_f) (store_wp ch l v, meta_w) (store_wp channel loc val, meta)); eauto.
+      { rewrite <- H0 in NODUP; simpl in *; auto. }
+      { rewrite <- H0 in STRUCTURE_J'; desf. }
+      { desf. }
+      desf. 
+      intro EQ; rewrite EQ in *.
+      forward eapply (NoDup_eq_simpl head0 (store_wp channel loc val, meta) tail0 (head2' ++ (fence_all_wp, meta_f) :: mid2) tail2').
+      { rewrite <- H0 in NODUP; vauto. }
+      { rewrite <- H0 in STRUCTURE_J'. simpl in *.
+        rewrite appA.
+        vauto. }
+      ins; desc.
+      rewrite H1 in *.
+      apply (NO_FENCE_ALL meta_f).
+      apply in_app_r; simpl; left; desf. }
+
+    2: {
+      assert (In (fence_all_wp, meta_f) w_pool').
+      { rewrite <- H2 in STRUCTURE_J; simpl in *. rewrite STRUCTURE_J. apply in_app_r. simpl. left. auto. }
+
+      forward eapply in_split as SPLIT; eauto.
+      destruct SPLIT as [l1 [l2 SPLIT]].
+      rewrite SPLIT in WRITE_POOL.
+      specialize IHj with (head2 := (fence_all_wp, meta) :: l1) (tail2 := l2).
+      specialize_full IHj; eauto.
+      { lia. }
+      { rewrite <- H0; simpl in *; vauto. }
+      desc.
+      forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' (nil) w_pool' (fence_all_wp, meta_f) (store_wp ch l v, meta_w) (fence_all_wp, meta)); eauto.
+      { rewrite <- H0 in NODUP; simpl in *; auto. }
+      { rewrite <- H0 in STRUCTURE_J'; desf. }
+      { desf. }
+      2: desf.
+      intro EQ; rewrite EQ in *.
+      forward eapply (NoDup_remove_2 nil w_pool' (fence_all_wp, meta)); eauto.
+      simpl. rewrite <- H0 in NODUP; simpl in *; desf. }
+
+    assert (In (fence_all_wp, meta_f) w_pool').
+    { rewrite <- H2 in STRUCTURE_J; simpl in *. rewrite STRUCTURE_J. apply in_app_r. simpl. left. auto. }
+
+    forward eapply in_split as SPLIT; eauto.
+    destruct SPLIT as [l1 [l2 SPLIT]].
+    rewrite SPLIT in WRITE_POOL.
+    specialize IHj with (head2 := (fence_ch_wp channel, meta) :: l1) (tail2 := l2).
+    specialize_full IHj; eauto.
+    { lia. }
+    { rewrite <- H0; simpl in *; vauto. }
+    desc.
+    forward eapply (list_double_structure_lemma w_pool head2' mid2 tail2' (nil) w_pool' (fence_all_wp, meta_f) (store_wp ch l v, meta_w) (fence_ch_wp channel, meta)); eauto.
+    { rewrite <- H0 in NODUP; simpl in *; auto. }
+    { rewrite <- H0 in STRUCTURE_J'; desf. }
     { desf. }
-    desf.
+    2: desf.
+    intro EQ; rewrite EQ in *.
+    forward eapply (NoDup_remove_2 nil w_pool' (fence_ch_wp channel, meta)); eauto.
+    simpl. rewrite <- H0 in NODUP; simpl in *; desf.
+Qed.
+
+Lemma fence_one_block': irreflexive (poch G ⨾ writepair G ⨾ sb G ⨾ (fenceonepair G)⁻¹).
+Proof.
+  red; ins.
+  destruct H as [x0 [POCH [x1 [PAIR [x2 [SB FENCE]]]]]].
+  assert (sb G x0 x1) as SBW by (eapply writepair_in_poch; eauto).
+  apply seq_eqv_lr in FENCE.
+  apply seq_eqv_lr in PAIR.
+  destruct FENCE as [[EGX FREQ] [PAIR01 [EG2 FRSP]]].
+  destruct PAIR as [[EG0 WREQ] [PAIR2 [EG1 WRSP]]].
+  (* План:
+     1) на x fence был => перед x0 он будет
+     2) на x0 было fence | write
+     3) на x1 было write => перед ним был fence
+     Противоречие с NO_FENCE_ONE
+  *)
+  forward eapply (req_in_write_buffer_until_resp x x2) with (trace_pos := trace_index x0); eauto.
+  all: try by (unfolder'; desf).
+  { forward eapply (sb_in_tb x x0); unfold EG in *; destruct EG0, EGX; unfolder'; desf. apply poch_in_sb; auto.  }
+  { assert (sb G x0 x2) by (eapply sb_trans; eauto).
+    forward eapply (sb_in_tb x0 x2); unfold EG in *; destruct EG0, EG2; unfolder'; desf.
+    lia. } 
+
+  forward eapply (req_in_write_buffer_until_resp x x2) with (trace_pos := trace_index x1); vauto.
+  all: try by (unfolder'; desf).
+  { forward eapply (sb_in_tb x x1); unfold EG in *; destruct EG1, EGX; unfolder'; desf. eapply sb_trans; eauto. eapply poch_in_sb; eauto. }
+  { forward eapply (sb_in_tb x1 x2); unfold EG in *; destruct EG1, EG2; unfolder'; desf. lia. } 
+
+  ins; desc.
+  
+  forward eapply (TSi (trace_index x0)) with (d := def_lbl) as TSi_write_req.
+  { apply Eninit_in_trace; destruct EG0; unfolder'; desf. }
+  forward eapply (TSi (trace_index x1)) with (d := def_lbl) as TSi_write_resp.
+  { apply Eninit_in_trace; destruct EG1; unfolder'; desf. }
+  inversion TSi_write_req.
+  all: try by (rewrite trace_index_simpl in H3; unfold EG in *; destruct EG0; unfolder'; desf).
+  inversion TSi_write_resp.
+  all: try by (rewrite trace_index_simpl in H6; unfold EG in *; destruct EG1; unfolder'; desf).
+  rewrite <- H2 in H0.
+  rewrite <- H5 in H.
+  simpl in *.
+  rewrite trace_index_simpl in *.
+  all: try by unfold EG in *; unfolder'; desf.
+  destruct x.
+  all: try by desf.
+  destruct e.
+  all: try by desf.
+  replace c with channel in *.
+  2: { red in POCH. destruct POCH; unfold same_ch in *; unfolder'; desf. }
+  forward eapply (fence_write_order_lemma (S (trace_index x0)) (trace_index x1)) with
+    (head := head) (mid := tail) (tail := nil)
+    (ch := channel) (meta_f := m) (meta_w := meta) (l := loc) (v := val).
+  { apply (NOmega.le_lt_nat) with (m := (trace_index x1)).  
+    - enough ((trace_index x0) < (trace_index x1)); try lia. apply sb_in_tb; vauto; unfold EG in *; unfolder'; desf.
+    - apply Eninit_in_trace; unfold EG in *; unfolder'; desf. }
+  { apply Eninit_in_trace; unfold EG in *; unfolder'; desf. }
+  { enough ((trace_index x0) < (trace_index x1)); try lia. apply sb_in_tb; vauto; unfold EG in *; unfolder'; desf. }
+  { rewrite <- H4; simpl. rewrite H0. rewrite appA. rewrite <- !app_comm_cons. simpl. auto. }
+  { rewrite <- H5; simpl; vauto. }
+  ins; desc.
+  assert (NoDup (TSOFPGA.w_pool (states (trace_index x1)))) as NODUP.
+  { apply write_pool_nodup. apply Eninit_in_trace; unfold EG in *; unfolder'; desf. }
+  rewrite <- H5 in *; simpl in *.
+  rewrite H in *.
+  forward eapply (NoDup_eq_simpl) with (a := (fence_ch_wp channel, m)); eauto.
+  ins; desc.
+  rewrite H1, H8 in *.
+  (* унифицировать store_wp в WRITE_POOL! *)
+  forward eapply (NoDup_eq_simpl) with (a :- )
+  rewrite <- WRITE_POOL in NO_FENCE_ONE.
+
+  (* STOPPED HERE *)
+
+
+  (* assert (exists ch, chan_opt x = Some ch) as [ch CHAN] by (unfolder'; desf; exists c0; desf).
+  forward eapply (write_in_buffer x x2 ch) with (trace_pos := trace_index x0) as WP_STRUCTURE_1; vauto.
+  { forward eapply (sb_in_tb x x0); unfold EG in *; destruct EG0, EGX; unfolder'; desf. apply poch_in_sb; auto.  }
+  { assert (sb G x0 x2) by (eapply sb_trans; eauto).
+    forward eapply (sb_in_tb x0 x2); unfold EG in *; destruct EG0, EG2; unfolder'; desf.
+    lia. } *)
+
 
 Lemma SCPL: acyclic ((poloc G ∪ rf G ∪ co G ∪ fr G) ∩ (is_cpu × is_cpu)).
 Proof.
