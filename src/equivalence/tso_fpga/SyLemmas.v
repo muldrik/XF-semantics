@@ -7786,19 +7786,109 @@ Proof.
   forward eapply (NoDup_eq_simpl) with (a := (fence_ch_wp channel, m)); eauto.
   ins; desc.
   rewrite H1, H8 in *.
+  destruct x0; desf.
+  red in PAIR2; desc; desf.
+  forward eapply (write_pool_nodup (trace_index (FpgaEvent (Fpga_write_resp c0 loc0 val0) index0 meta0))).
+  { apply Eninit_in_trace; unfold EG in *; destruct EG1; desf. }
+  intro NODUP'.
+  rewrite <- H5 in NODUP'.
+  simpl in NODUP'.
   (* унифицировать store_wp в WRITE_POOL! *)
-  forward eapply (NoDup_eq_simpl) with (a :- )
-  rewrite <- WRITE_POOL in NO_FENCE_ONE.
+  forward eapply (NoDup_eq_simpl) with 
+    (a := (store_wp c0 loc0 val0, meta0)) (l1 := head2' ++ (fence_ch_wp c0, m1) :: mid2) (l1' := tail2')
+    (l2 := head1) (l2' := tail1); eauto.
+  { rewrite appA. rewrite <- app_comm_cons. auto. }
+  { rewrite appA. rewrite <- app_comm_cons. auto. }
+  intro H; destruct H as [EQ _].
+  rewrite <- EQ in NO_FENCE_ONE.
+  apply (NO_FENCE_ONE m1).
+  apply in_app_r.
+  simpl; left; auto.
+Qed.
 
-  (* STOPPED HERE *)
-
-
-  (* assert (exists ch, chan_opt x = Some ch) as [ch CHAN] by (unfolder'; desf; exists c0; desf).
-  forward eapply (write_in_buffer x x2 ch) with (trace_pos := trace_index x0) as WP_STRUCTURE_1; vauto.
-  { forward eapply (sb_in_tb x x0); unfold EG in *; destruct EG0, EGX; unfolder'; desf. apply poch_in_sb; auto.  }
+Lemma fence_all_block': irreflexive (sb G ⨾ writepair G ⨾ sb G ⨾ (fenceallpair G)⁻¹).
+Proof.
+  red; ins.
+  destruct H as [x0 [SB' [x1 [PAIR [x2 [SB FENCE]]]]]].
+  assert (sb G x0 x1) as SBW by (eapply writepair_in_poch; eauto).
+  apply seq_eqv_lr in FENCE.
+  apply seq_eqv_lr in PAIR.
+  destruct FENCE as [[EGX FREQ] [PAIR01 [EG2 FRSP]]].
+  destruct PAIR as [[EG0 WREQ] [PAIR2 [EG1 WRSP]]].
+  (* План:
+     1) на x fence был => перед x0 он будет
+     2) на x0 было fence | write
+     3) на x1 было write => перед ним был fence
+     Противоречие с NO_FENCE_ONE
+  *)
+  forward eapply (req_in_write_buffer_until_resp x x2) with (trace_pos := trace_index x0); eauto.
+  all: try by (unfolder'; desf).
+  { forward eapply (sb_in_tb x x0); unfold EG in *; destruct EG0, EGX; unfolder'; desf. }
   { assert (sb G x0 x2) by (eapply sb_trans; eauto).
     forward eapply (sb_in_tb x0 x2); unfold EG in *; destruct EG0, EG2; unfolder'; desf.
-    lia. } *)
+    lia. } 
+
+  forward eapply (req_in_write_buffer_until_resp x x2) with (trace_pos := trace_index x1); vauto.
+  all: try by (unfolder'; desf).
+  { forward eapply (sb_in_tb x x1); unfold EG in *; destruct EG1, EGX; unfolder'; desf. eapply sb_trans; eauto. }
+  { forward eapply (sb_in_tb x1 x2); unfold EG in *; destruct EG1, EG2; unfolder'; desf. lia. } 
+
+  ins; desc.
+  
+  forward eapply (TSi (trace_index x0)) with (d := def_lbl) as TSi_write_req.
+  { apply Eninit_in_trace; destruct EG0; unfolder'; desf. }
+  forward eapply (TSi (trace_index x1)) with (d := def_lbl) as TSi_write_resp.
+  { apply Eninit_in_trace; destruct EG1; unfolder'; desf. }
+  inversion TSi_write_req.
+  all: try by (rewrite trace_index_simpl in H3; unfold EG in *; destruct EG0; unfolder'; desf).
+  inversion TSi_write_resp.
+  all: try by (rewrite trace_index_simpl in H6; unfold EG in *; destruct EG1; unfolder'; desf).
+  rewrite <- H2 in H0.
+  rewrite <- H5 in H.
+  simpl in *.
+  rewrite trace_index_simpl in *.
+  all: try by unfold EG in *; unfolder'; desf.
+  destruct x.
+  all: try by desf.
+  destruct e.
+  all: try by desf.
+  forward eapply (fence_all_write_order_lemma (S (trace_index x0)) (trace_index x1)) with
+    (head := head) (mid := tail) (tail := nil)
+    (ch := channel) (meta_f := m) (meta_w := meta) (l := loc) (v := val).
+  { apply (NOmega.le_lt_nat) with (m := (trace_index x1)).  
+    - enough ((trace_index x0) < (trace_index x1)); try lia. apply sb_in_tb; vauto; unfold EG in *; unfolder'; desf.
+    - apply Eninit_in_trace; unfold EG in *; unfolder'; desf. }
+  { apply Eninit_in_trace; unfold EG in *; unfolder'; desf. }
+  { enough ((trace_index x0) < (trace_index x1)); try lia. apply sb_in_tb; vauto; unfold EG in *; unfolder'; desf. }
+  { rewrite <- H4; simpl. rewrite H0. rewrite appA. rewrite <- !app_comm_cons. simpl. auto. }
+  { rewrite <- H5; simpl; vauto. }
+  ins; desc.
+  assert (NoDup (TSOFPGA.w_pool (states (trace_index x1)))) as NODUP.
+  { apply write_pool_nodup. apply Eninit_in_trace; unfold EG in *; unfolder'; desf. }
+  rewrite <- H5 in *; simpl in *.
+  rewrite H in *.
+  forward eapply (NoDup_eq_simpl) with (a := (fence_all_wp, m)); eauto.
+  ins; desc.
+  rewrite H1, H8 in *.
+  destruct x0; desf.
+  red in PAIR2; desc; desf.
+  forward eapply (write_pool_nodup (trace_index (FpgaEvent (Fpga_write_resp channel0 loc0 val0) index0 meta0))).
+  { apply Eninit_in_trace; unfold EG in *; destruct EG1; desf. }
+  intro NODUP'.
+  rewrite <- H5 in NODUP'.
+  simpl in NODUP'.
+  (* унифицировать store_wp в WRITE_POOL! *)
+  forward eapply (NoDup_eq_simpl) with 
+    (a := (store_wp channel0 loc0 val0, meta0)) (l1 := head2' ++ (fence_all_wp, m1) :: mid2) (l1' := tail2')
+    (l2 := head1) (l2' := tail1); eauto.
+  { rewrite appA. rewrite <- app_comm_cons. auto. }
+  { rewrite appA. rewrite <- app_comm_cons. auto. }
+  intro H; destruct H as [EQ _].
+  rewrite <- EQ in NO_FENCE_ALL.
+  apply (NO_FENCE_ALL m1).
+  apply in_app_r.
+  simpl; left; auto.
+Qed.
 
 
 Lemma SCPL: acyclic ((poloc G ∪ rf G ∪ co G ∪ fr G) ∩ (is_cpu × is_cpu)).
