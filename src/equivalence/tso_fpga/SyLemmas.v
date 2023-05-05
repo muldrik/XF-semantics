@@ -1248,11 +1248,6 @@ Proof.
   apply propositional_extensionality; split; apply H.
 Qed.  
 
-(* Lemma init_non_rw: forall l, ~ cpu_write' (inl (InitEvent l)). *)
-(* Proof. *)
-(*   apply init_non_rw'.  *)
-(* Qed. *)
-
 
 
 Lemma write2prop_cpu_lem w
@@ -1283,15 +1278,6 @@ Proof.
   { auto. }
   desc. exists j. splits; vauto.
 Qed.
-
-(* Lemma write2prop_general w
-      (* (DOM: NOmega.lt_nat_l w (trace_length tr)) *)
-      (W: write' (trace_labels w)):
-  exists p,
-    ⟪THREAD_PROP: (is_cpuprop ∩₁ same_thread (trace_labels w)) (trace_labels p)⟫ /\
-    (* ⟪P_DOM: NOmega.lt_nat_l p (trace_length tr)⟫ /\ *)
-    ⟪W_P_CORR: count_upto (cpu_write' ∩₁ same_thread (trace_labels w)) w =
-               count_upto (is_cpu_prop∩₁ same_thread (trace_labels w)) p⟫. *)
 
 Definition any_ups2prop (w: nat) :=
   match (excluded_middle_informative (fpga_up_prop (trace_labels w))) with
@@ -1969,17 +1955,6 @@ Proof.
   ins. apply set_extensionality. 
   unfold same_thread, in_cpu_thread. simpl. red. splits; red; ins; desc; vauto.
 Qed. 
-
-(* Lemma RESTR_EQUIV_CHAN chan index lbl meta:
-  same_chan (EventLab (FpgaEvent lbl index meta)) = in_chan chan.
-Proof.
-  ins. apply set_extensionality. 
-  unfold same_chan, in_chan. simpl.
-  red. splits; red; ins; desc; vauto.
-  destruct lbl, x; desf.
-  destruct x; vauto.
-  unfold lbl_chan_opt in *; destruct lbl; simpl; desf.
-Qed.  *)
     
 Definition G :=
   {| acts := EG;
@@ -7877,7 +7852,6 @@ Proof.
   intro NODUP'.
   rewrite <- H5 in NODUP'.
   simpl in NODUP'.
-  (* унифицировать store_wp в WRITE_POOL! *)
   forward eapply (NoDup_eq_simpl) with 
     (a := (store_wp channel0 loc0 val0, meta0)) (l1 := head2' ++ (fence_all_wp, m1) :: mid2) (l1' := tail2')
     (l2 := head1) (l2' := tail1); eauto.
@@ -7943,11 +7917,6 @@ Proof.
     rewrite <- seq_union_r. rewrite inclusion_t_rt, unionK. rewrite <- ct_begin.
     unfold acyclic. rewrite ct_of_ct. fold (acyclic vis_lt).
     cdes vis_SPO. apply trans_irr_acyclic; auto. }
-
-(* Lemma G_Consistent: Ax86Consistent G.
-Proof.
-  split.
-} *)
 
 Lemma TSO_op_implies_decl:
   (fun e => trace_elems tr (EventLab e)) ≡₁ acts G \₁ is_init /\ 
