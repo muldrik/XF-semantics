@@ -2255,7 +2255,7 @@ Proof.
       unfold TSO_hb. rewrite <- ct_step. 
       rewrite coi_union_coe, fri_union_fre. basic_solver. }
     rewrite ct_of_trans.
-    2: { apply restr_eq_trans, sb_trans. }
+    2: { apply restr_eq_trans; apply sb_trans. }
     arewrite (restr_eq_rel loc (sb G) ⊆ ppo G ∪ (⦗is_w⦘ ⨾ restr_eq_rel loc (sb G) ⨾ ⦗is_r⦘)).
     { rewrite sb_ppo_ext at 1. rewrite restr_eq_union.
       apply union_mori; basic_solver. }

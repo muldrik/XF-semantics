@@ -1,8 +1,3 @@
-### Thesis todo:
-- [ ] Add a runnable image
-- [ ] Equivalence of rf definitions
-
-
 This code contains Coq proofs supplementing the _Making Weak Memory Models Fair_ paper.
 More on the artifact constructed from the code (including a VM image and installation guidelines) are stated in [ARTIFACT.md](ARTIFACT.md).
 
