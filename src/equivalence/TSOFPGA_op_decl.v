@@ -11,7 +11,7 @@ Require Import AuxProp.
 Require Import AuxRel.
 From hahn Require Import Hahn.
 
-Section Theorems.
+Section TSOFPGA_op_decl.
 
 Variable tr: trace SyLabel.
 Variable states: nat -> SyState. 
@@ -6767,7 +6767,7 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { destruct POCH; unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf. }
   
   assert (Eninit x1). { destruct EG1; unfolder'; desf. }
-  forward eapply (Theorems.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
+  forward eapply (TSOFPGA_op_decl.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence.
   all: try by (rewrite trace_index_simpl in H7; desf).
@@ -6777,7 +6777,7 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { destruct POCH. red in PAIR2; unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf; desc; auto. }
 
   assert (Eninit x2). { destruct EG2; unfolder'; desf. }
-  forward eapply (Theorems.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
+  forward eapply (TSOFPGA_op_decl.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_write.
   all: try by (rewrite trace_index_simpl in H11; desf).
@@ -6789,7 +6789,7 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { red in PAIR2; unfolder'; desf. }
 
 
-  forward eapply (Theorems.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
+  forward eapply (TSOFPGA_op_decl.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence_req.
   all: try by (rewrite trace_index_simpl in H14; desf).
@@ -7088,7 +7088,7 @@ Lemma fence_all_response': irreflexive (sb G ⨾ fenceallpair G ⨾ sb G ⨾ (wr
   2: { unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf. }
   
   assert (Eninit x1). { destruct EG1; unfolder'; desf. }
-  forward eapply (Theorems.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
+  forward eapply (TSOFPGA_op_decl.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence.
   all: try by (rewrite trace_index_simpl in H7; desf).
@@ -7096,7 +7096,7 @@ Lemma fence_all_response': irreflexive (sb G ⨾ fenceallpair G ⨾ sb G ⨾ (wr
   simpl in *.
 
   assert (Eninit x2). { destruct EG2; unfolder'; desf. }
-  forward eapply (Theorems.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
+  forward eapply (TSOFPGA_op_decl.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_write.
   all: try by (rewrite trace_index_simpl in H11; desf).
@@ -7108,7 +7108,7 @@ Lemma fence_all_response': irreflexive (sb G ⨾ fenceallpair G ⨾ sb G ⨾ (wr
   2: { red in PAIR2; unfolder'; desf. }
 
 
-  forward eapply (Theorems.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
+  forward eapply (TSOFPGA_op_decl.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence_req.
   all: try by (rewrite trace_index_simpl in H14; desf).
@@ -8192,4 +8192,4 @@ Qed.
 
 Print Assumptions TSOFPGA_op_implies_decl.
 
-End Theorems.
+End TSOFPGA_op_decl.
