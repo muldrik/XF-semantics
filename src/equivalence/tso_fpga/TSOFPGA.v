@@ -187,37 +187,9 @@ Definition FPGA_trace_wf (t: trace SyLabel) :=
     (TR_J: trace_nth j t d = EventLab (FpgaEvent lbl2 index2 meta2)),
     index1 < index2.
 
-
-
-(* Definition same_meta_l  (e1 e2 : SyLabel) :=
-  match e1, e2 with
-  | EventLab (FpgaEvent _ _ meta1), EventLab (FpgaEvent _ _ meta2) => meta1 = meta2
-  | _, _ => False
-  end.
-
-Definition req_resp_pair (e1 e2 : SyLabel) :=
-  match e1, e2 with
-  | EventLab (FpgaEvent (Fpga_read_req _ _) _ _), EventLab (FpgaEvent (Fpga_read_resp _ _ _) _ _) => True
-  | EventLab (FpgaEvent (Fpga_write_req _ _ _) _ _), EventLab (FpgaEvent (Fpga_write_resp _) _ _) => True
-  | EventLab (FpgaEvent (Fpga_fence_req_one _) _ _), EventLab (FpgaEvent (Fpga_fence_resp_one _) _ _) => True
-  | EventLab (FpgaEvent (Fpga_fence_req_all) _ _), EventLab (FpgaEvent (Fpga_fence_resp_all) _ _) => True
-  | _, _ => False
-  end.
-
-Definition is_req e := match e with
-  | EventLab (FpgaEvent (Fpga_read_req _ _) _ _) => True
-  | EventLab (FpgaEvent (Fpga_write_req _ _ _) _ _) => True
-  | EventLab (FpgaEvent (Fpga_fence_req_one _) _ _) => True
-  | EventLab (FpgaEvent (Fpga_fence_req_all) _ _) => True
-  | _ => False
-  end.
-
-Definition is_pair :=
-  same_meta_l ∩ (clos_sym req_resp_pair). *)
-
 Definition def_lbl: SyLabel := EventLab (InitEvent 0). 
 
-(* Если два запроса имеют одну мету, то либо это один и тот же, либо они образуют пару *)
+(* Two requests with the same meta must be a pair. This prohibits meta duplication *)
 Definition FPGA_trace_pair_unique_wf (t: trace SyLabel) :=
   forall i j index1 index2 fpgaE1 fpgaE2 meta
     (LTij: i < j)
@@ -227,21 +199,30 @@ Definition FPGA_trace_pair_unique_wf (t: trace SyLabel) :=
     req_resp_pair (FpgaEvent fpgaE1 index1 meta) (FpgaEvent fpgaE2 index2 meta).
 
 
-Definition FPGA_trace_read_req_wf (t: trace SyLabel) :=
-  forall lbl i chan loc meta
-    (TR_I: trace_nth i t def_lbl = lbl)
-    (IS_REQ: lbl = EventLab (FpgaEvent (Fpga_read_req chan loc) i meta)),
-  exists j lbl2, i < j /\ (NOmega.lt_nat_l j (trace_length t)) /\
-    trace_nth j t def_lbl = lbl2 /\ 
-    lbl2 = FpgaReadToUpstream chan loc meta.
 
-(* TODO: < instead of <=? *)
-(* TODO: remember FpgaEvent fpgaE1 index1 meta 1 *)
-Definition FPGA_trace_pair_exists_wf (t: trace SyLabel) := 
+(* The next three conditions cannot be guaranteed by standard fairness in infinite executions *)
+(* The operational semantics require changes in order to convert them to standard fairness *)
+Definition FPGA_writepair_exists_wf (t: trace SyLabel) := 
   forall i d e1
     (TR_I: trace_nth i t d = EventLab e1)
-    (IS_REQ: is_req e1),
-  exists j e2, i <= j /\ (NOmega.lt_nat_l j (trace_length t)) /\
+    (IS_REQ: is_wr_req e1),
+  exists j e2, i < j /\ (NOmega.lt_nat_l j (trace_length t)) /\
+    trace_nth j t def_lbl = EventLab e2 /\ 
+    req_resp_pair e1 e2.
+
+Definition FPGA_fenceonepair_exists_wf (t: trace SyLabel) := 
+  forall i d e1
+    (TR_I: trace_nth i t d = EventLab e1)
+    (IS_REQ: is_fence_req_one e1),
+  exists j e2, i < j /\ (NOmega.lt_nat_l j (trace_length t)) /\
+    trace_nth j t def_lbl = EventLab e2 /\ 
+    req_resp_pair e1 e2.
+
+Definition FPGA_fenceallpair_exists_wf (t: trace SyLabel) := 
+  forall i d e1
+    (TR_I: trace_nth i t d = EventLab e1)
+    (IS_REQ: is_fence_req_all e1),
+  exists j e2, i < j /\ (NOmega.lt_nat_l j (trace_length t)) /\
     trace_nth j t def_lbl = EventLab e2 /\ 
     req_resp_pair e1 e2.
 
@@ -250,7 +231,9 @@ Record TSOFPGA_trace_wf (t: trace SyLabel) :=
     TSO_TR_WF : TSO_trace_wf t;
     FPGA_TR_WF : FPGA_trace_wf t;
     PAIR_UNIQUE : FPGA_trace_pair_unique_wf t; 
-    PAIR_EXISTS : FPGA_trace_pair_exists_wf t
+    WRITEPAIR_EXISTS: FPGA_writepair_exists_wf t;
+    FENCEONEPAIR_EXISTS: FPGA_fenceonepair_exists_wf t;
+    FENCEALLPAIR_EXISTS: FPGA_fenceallpair_exists_wf t;
   }.    
 
 Definition TSO_hb G := ((ppo G ∪ rfe G ∪ co G ∪ fr G) ∩ (is_cpu × is_cpu))^+. 
@@ -414,13 +397,6 @@ Definition val_l (lbl: SyLabel) := match lbl with
   | _ => 0
   end.
 
-(* Definition chan_l (lbl: SyLabel) := match lbl with
-  | EventLab e => chan e
-  | FpgaMemFlush c _ _ _ => c
-  | FpgaMemRead c _ _ _ => c
-  | FpgaReadToUpstream c _ _ => c
-  | _ => 0
-  end. *)
 
 Definition write' := cpu_write' ∪₁ fpga_write'.
 
@@ -432,6 +408,23 @@ Definition TSO_fair tr st :=
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = CpuFlush tid.
 
+Definition enabled_readpool st chan loc meta := exists st', TSOFPGA_step st (FpgaReadToUpstream chan loc meta) st'.
+Definition readpool_fair tr st :=
+  forall i chan loc meta
+    (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
+    (ENABLED: enabled_readpool (st i) chan loc meta),
+  exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
+       trace_nth j tr def_lbl = FpgaReadToUpstream chan loc meta.
+
+(* Doesn't work right now because the system is not fair
+Definition enabled_writepool_write st chan loc val meta event_ind := exists st', TSOFPGA_step st (EventLab (FpgaEvent (Fpga_write_resp chan loc val) event_ind meta)) st'.
+Definition writepool_write_fair tr st :=
+  forall i chan loc val meta event_ind0
+    (DOM_EXT: NOmega.lt_nat_l i (trace_length tr)) (* le accounts for the final state if any*)
+    (ENABLED: enabled_writepool_write (st i) chan loc val meta event_ind0),
+  exists j event_ind, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
+       trace_nth j tr def_lbl = (EventLab (FpgaEvent (Fpga_write_resp chan loc val) event_ind meta)). *)
+
 
 Definition enabled_mem_flush st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemFlush chan loc val meta) st'.
 Definition mem_flush_fair tr st :=
@@ -441,19 +434,12 @@ Definition mem_flush_fair tr st :=
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = FpgaMemFlush chan loc val meta.
 
-Definition enabled_readpool st chan loc meta := exists st', TSOFPGA_step st (FpgaReadToUpstream chan loc meta) st'.
-Definition readpool_fair tr st :=
-  forall i chan loc meta
-    (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
-    (ENABLED: enabled_readpool (st i) chan loc meta),
-  exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
-       trace_nth j tr def_lbl = FpgaReadToUpstream chan loc meta.
 
-Definition enabled_writepool st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemRead chan loc val meta) st'.
-Definition writepool_fair tr st :=
+Definition enabled_memread st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemRead chan loc val meta) st'.
+Definition memread_fair tr st :=
   forall i chan loc val meta
     (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
-    (ENABLED: enabled_writepool (st i) chan loc val meta),
+    (ENABLED: enabled_memread (st i) chan loc val meta),
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = FpgaMemRead chan loc val meta.
 
@@ -535,6 +521,12 @@ Proof.
   destruct tlab eqn:WW; vauto; eauto.
 Qed.
 
+Lemma fpga_memflush_structure tlab (R: is_fpga_prop tlab):
+  exists chan loc val meta, tlab = FpgaMemFlush chan loc val meta.
+Proof.
+  unfolder'.
+  destruct tlab eqn:WW; vauto; eauto.
+Qed.
 
 Lemma init_non_r r (Rr: is_r r) (INIT: is_init r): False.
 Proof. generalize Rr, INIT. unfolder'. by destruct r. Qed. 
