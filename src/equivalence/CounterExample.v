@@ -205,14 +205,26 @@ Proof.
         rewrite rf_empty.
         rewrite !(union_false_l).
         rewrite !union_false_r.
-        arewrite (ppoFpga G ∪ co G ⊆ co G ∪ ppoFpga G).
-        
-        apply acyclic_union.
-        { apply (co_acyclic WFG). }
-        rewrite (wf_coD WFG).
-        apply acyclic_disj.
-        red; ins.
-        admit.
+        arewrite (ppoFpga G ⊆ sb G).
+        { red; ins.
+          red in H.
+          destruct H as [[A | A] | A].
+          { apply seq_eqv_lr in A.
+            desf.
+            destruct A0; auto. }
+          { apply seq_eqv_lr in A; desf. }
+          { red in A. 
+            destruct A as [[[P | P] | P] | P].
+            - cbv in P; desf.
+            - simpl in P; apply seq_eqv_lr in P; desf. destruct P, P1. apply seq_eqv_lr; splits; desf; cbv in *; desf; lia.
+            - simpl in P; apply seq_eqv_lr in P; desf. destruct P, P1. apply seq_eqv_lr; splits; desf; cbv in *; desf; lia.
+            - cbv in P; desf.
+           }  
+        }
+        arewrite (co G ⊆ sb G).
+        { red; ins. apply seq_eqv_lr; cbv in H; splits; simpl; unfolder''; desf; intuition. }
+        rewrite unionK.
+        apply sb_acyclic.
        }
     all: try by (rewrite fr_empty; repeat (rewrite seq_false_l); basic_solver).
     { rewrite rf_empty.
@@ -257,36 +269,36 @@ Proof.
       simpl in *.
       unfold ext_sb, same_ch, chan_opt, fpga_chan_opt in *;  simpl in *;  desf.
       unfold w2 in *; desf; lia. }
-    { red; ins.
-      destruct H as [x0 [POCH [x1 [PAIR [x2 [SB FENCE]]]]]].
-      apply seq_eqv_lr in FENCE.
-      apply seq_eqv_lr in PAIR.
-      apply seq_eqv_lr in SB.
-      destruct POCH as [SB' SCH].
-      apply seq_eqv_lr in SB'.
-      simpl in *.
-      desf.
-      destruct FENCE, FENCE1.
-      unfold EG in H1, SB1.
-      simpl in *.
-      red in H0, FENCE0, H2.
-      red in SB0.
-      destruct PAIR, PAIR1.
-      unfold w1, w1_resp, f1, f1_resp, w2, w2_resp, f2, f2_resp, is_init in *.
-      destruct x0, x1; desf; try lia.
-      { unfold ext_sb in *.
-        unfold EG in SB'; simpl in *; desf.
-        unfold ext_sb, same_ch, chan_opt, fpga_chan_opt in *;  simpl in *;  desf.
-        unfold EG in SB'1; simpl in *; desf.
-        unfold w1 in *; desf; lia. }
-      unfold ext_sb in *.
+    red; ins.
+    destruct H as [x0 [POCH [x1 [PAIR [x2 [SB FENCE]]]]]].
+    apply seq_eqv_lr in FENCE.
+    apply seq_eqv_lr in PAIR.
+    apply seq_eqv_lr in SB.
+    destruct POCH as [SB' SCH].
+    apply seq_eqv_lr in SB'.
+    simpl in *.
+    desf.
+    destruct FENCE, FENCE1.
+    unfold EG in H1, SB1.
+    simpl in *.
+    red in H0, FENCE0, H2.
+    red in SB0.
+    destruct PAIR, PAIR1.
+    unfold w1, w1_resp, f1, f1_resp, w2, w2_resp, f2, f2_resp, is_init in *.
+    destruct x0, x1; desf; try lia.
+    { unfold ext_sb in *.
       unfold EG in SB'; simpl in *; desf.
       unfold ext_sb, same_ch, chan_opt, fpga_chan_opt in *;  simpl in *;  desf.
       unfold EG in SB'1; simpl in *; desf.
-      unfold w2, f2 in *; desf.
-      unfold EG in H5; simpl in *; desf.
-      unfold w2_resp in *; desf. lia. }
-Admitted.
+      unfold w1 in *; desf; lia. }
+    unfold ext_sb in *.
+    unfold EG in SB'; simpl in *; desf.
+    unfold ext_sb, same_ch, chan_opt, fpga_chan_opt in *;  simpl in *;  desf.
+    unfold EG in SB'1; simpl in *; desf.
+    unfold w2, f2 in *; desf.
+    unfold EG in H5; simpl in *; desf.
+    unfold w2_resp in *; desf. lia. 
+Qed.
 
 Lemma Valid_execution:
   Wf_fpga G /\ Wf G /\
