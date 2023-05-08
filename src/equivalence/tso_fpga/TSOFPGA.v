@@ -397,7 +397,8 @@ Definition val_l (lbl: SyLabel) := match lbl with
   | _ => 0
   end.
 
-
+Definition fpga_up_prop := fpga_read_ups' ∪₁ fpga_write'.
+Definition fpga_any_mem_prop := fpga_mem_read' ∪₁ is_fpga_prop.
 Definition write' := cpu_write' ∪₁ fpga_write'.
 
 Definition enabled_cpu st tid := exists st', TSOFPGA_step st (CpuFlush tid) st'. 
@@ -428,6 +429,10 @@ Definition mem_read_fair_alt tr := forall chan,
   trace_length (trace_filter (fpga_read_ups' ∩₁ in_chan chan) tr) =
   trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
 
+Definition upstream_combined_fair_alt tr := forall chan,
+  trace_length (trace_filter (fpga_up_prop ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_any_mem_prop ∩₁ in_chan chan) tr).
+
 Definition enabled_mem_flush st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemFlush chan loc val meta) st'.
 Definition mem_flush_fair tr st :=
   forall i chan loc val meta
@@ -452,9 +457,6 @@ Definition memwrite_fair tr st :=
     (ENABLED: enabled_memwrite (st i) chan loc val meta),
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = FpgaMemFlush chan loc val meta.
-
-Definition fpga_up_prop := fpga_read_ups' ∪₁ fpga_write'.
-Definition fpga_any_mem_prop := fpga_mem_read' ∪₁ is_fpga_prop.
 
 End TSOFPGA.
 

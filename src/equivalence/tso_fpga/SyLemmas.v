@@ -36,6 +36,7 @@ Hypothesis (RP_FAIR: readpool_fair tr states).
 Hypothesis (EXACT_CHAN_READS: downstream_fair_alt tr).
 Hypothesis (EXACT_CHAN_PROPS: mem_flush_fair_alt tr).
 Hypothesis (EXACT_CHAN_MEMREADS: mem_read_fair_alt tr).
+Hypothesis (EXACT_CHAN_ANY_PROPS: upstream_combined_fair_alt tr).
 
 Definition Ecpu := fun e => trace_elems tr (EventLab e) /\ is_cpu e.
 Definition Efpga := fun e => trace_elems tr (EventLab e) /\ is_fpga e.
@@ -879,34 +880,6 @@ Proof.
   forward eapply downstream_size_inv; eauto.
   forward eapply (TSi i) with (d := def_lbl) as TSi; vauto.
 Qed.
-
-
-Lemma EXACT_CHAN_ANY_PROPS chan:
-  trace_length (trace_filter (fpga_up_prop ∩₁ in_chan chan) tr) =
-  trace_length (trace_filter (fpga_any_mem_prop ∩₁ in_chan chan) tr).
-Proof.
-  (* forward eapply (EXACT_CHAN_PROPS chan) as EXACT_CHAN_PROPS.
-  forward eapply (EXACT_CHAN_MEMREADS chan) as EXACT_CHAN_MEMREADS.
-  unfold fpga_up_prop, fpga_any_mem_prop.
-  replace ((fpga_read_ups' ∪₁ fpga_write') ∩₁ in_chan chan) with
-      ((fpga_read_ups' ∩₁ in_chan chan) ∪₁ (fpga_write' ∩₁ in_chan chan)).
-  2: { apply set_extensionality. rewrite set_inter_union_l. auto. }
-  replace ((fpga_mem_read' ∪₁ is_fpga_prop) ∩₁ in_chan chan) with
-      ((fpga_mem_read' ∩₁ in_chan chan) ∪₁ (is_fpga_prop ∩₁ in_chan chan)).
-  2: { apply set_extensionality. rewrite set_inter_union_l. auto. }
-  unfold trace_length in *.
-  destruct tr.
-  { unfold trace_filter in *.
-    erewrite filterP_union_length.
-    2: { red; splits; vauto. red; ins; destruct H; unfolder'; desf. }
-    erewrite filterP_union_length.
-    2: { red; splits; vauto. red; ins; destruct H; unfolder'; desf. }
-    f_equal.
-    desf.
-    lia. }
-  destruct (trace_filter (fpga_mem_read' ∩₁ in_chan chan) (trace_inf fl)). *)
-  Admitted.
-
 
 Definition same_chan x y :=
   let chan := lbl_chan_opt x in
@@ -2279,7 +2252,6 @@ Proof.
   replace x with (extract_event (trace_index x)).
   2: { unfold extract_event. unfold trace_labels. by rewrite trace_index_simpl. }
   apply in_map. apply in_seq0_iff.
-  Search vis' ge.
   forward eapply (TI_LE_VIS x); eauto.
   ins; lia.
 Qed.
@@ -5252,7 +5224,6 @@ Proof.
     assert (Eninit x). { destruct ACT_X; vauto; unfolder'; desf. }
     assert (Eninit y). { destruct ACT_Y; vauto. red in SBxy. destruct x, y; unfolder'; desf. }
     splits; vauto.
-    Search (vis' _).
     forward eapply (TI_LE_VIS y); vauto.
     forward eapply (r_vis x); vauto.
     { unfolder'. unfold is_r; desf. }
@@ -5924,7 +5895,6 @@ Proof.
     rewrite unionK.
     exact acyclic_vis_lt. }
   { arewrite (r ⊆ poch G); [|apply poch_acyclic].
-    Search eqv_rel inclusion.
     red; ins.
     apply seq_eqv_lr in H.
     desf. }
@@ -6323,7 +6293,6 @@ Proof using.
   set (f := fun x => x <> e2).
   assert (forall tl (NN : ~ In e2 tl), tl = filterP f tl) as BB.
   { ins.
-    Search filterP eq.
     erewrite filterP_ext with (f := f) (f' := fun _ => True).
     2: { ins; split; ins; auto. red. intro. subst x; vauto. }
     clear -tl.
@@ -6355,7 +6324,6 @@ Proof using.
   set (f := fun x => x <> e2).
   assert (forall tl (NN : ~ In e2 tl), tl = filterP f tl) as BB.
   { ins.
-    Search filterP eq.
     erewrite filterP_ext with (f := f) (f' := fun _ => True).
     2: { ins; split; ins; auto. red. intro. subst x; vauto. }
     clear -tl.
@@ -6380,7 +6348,6 @@ Lemma list_last_elem_lemma [A: Type] head e1 tail (l: list A) e2
   exists tail', 
  ⟪ALT_STRUCTURE: l = head ++ e1 :: tail'⟫.
 Proof.
-  Search app cons nil eq.
   exists (removelast (tail)).
   destruct tail.
   { exfalso. apply DIFF_ELEMS. vauto. 
@@ -8194,7 +8161,7 @@ Proof.
   intuition; vauto.
 Qed.
 
-Lemma TSO_op_implies_decl:
+Lemma TSOFPGA_op_implies_decl:
   (fun e => trace_elems tr (EventLab e)) ≡₁ acts G \₁ is_init /\ 
   Wf_fpga G /\ Wf G /\
   Ax86Consistent G.
@@ -8219,5 +8186,6 @@ Proof.
   apply fence_one_block'.
 Qed.
 
+Print Assumptions TSOFPGA_op_implies_decl.
 
 End SyLemmas.
