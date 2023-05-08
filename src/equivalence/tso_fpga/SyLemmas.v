@@ -33,6 +33,9 @@ Hypothesis (TR: LTS_trace_param TSOFPGA_lts states tr).
 Hypothesis (WF: TSOFPGA_trace_wf tr). 
 Hypothesis (TSO_FAIR: TSO_fair tr states).
 Hypothesis (RP_FAIR: readpool_fair tr states).
+Hypothesis (EXACT_CHAN_READS: downstream_fair_alt tr).
+Hypothesis (EXACT_CHAN_PROPS: mem_flush_fair_alt tr).
+Hypothesis (EXACT_CHAN_MEMREADS: mem_read_fair_alt tr).
 
 Definition Ecpu := fun e => trace_elems tr (EventLab e) /\ is_cpu e.
 Definition Efpga := fun e => trace_elems tr (EventLab e) /\ is_fpga e.
@@ -878,123 +881,11 @@ Proof.
 Qed.
 
 
-Lemma EXACT_CHAN_PROPS chan:
-  trace_length (trace_filter (fpga_write' ∩₁ in_chan chan) tr) =
-  trace_length (trace_filter (is_fpga_prop ∩₁ in_chan chan) tr).
-Proof.
-remember (trace_length (trace_filter (fpga_write' ∩₁ in_chan chan) tr)) as len_writes.
-remember (trace_length (trace_filter (is_fpga_prop ∩₁ in_chan chan) tr)) as len_props. 
-pose proof (NOmega_lt_trichotomy len_writes len_props). des; auto.
-{ exfalso. destruct len_writes as [|n_writes]; auto.
-  forward eapply (trace_nth_filter (is_fpga_prop ∩₁ in_chan chan) tr n_writes def_lbl) as [extra_prop_pos [DOM_EP [MATCH_PROP COUNT_PROPS]]].
-  { vauto. }
-  fold (count_upto (is_fpga_prop ∩₁ in_chan chan) extra_prop_pos) in COUNT_PROPS.
-  forward eapply (filter_ends tr (fpga_write' ∩₁ in_chan chan) def_lbl) as [w_bound [DOM_WB WRITES_BOUND]]. 
-  { by rewrite <- Heqlen_writes. }
-  set (bound := max (extra_prop_pos + 1) w_bound).     
-  forward eapply (buffer_size_upstream_write chan bound) as BUF_SIZE.
-  { destruct tr; auto. simpl in *. subst bound.
-    apply NPeano.Nat.max_lub_iff. split; lia. }
-  simpl in BUF_SIZE. remember (states bound) as st.
-  cut (count_upto (fpga_write' ∩₁ in_chan chan) bound <= n_writes /\
-        count_upto (is_fpga_prop ∩₁ in_chan chan) bound > n_writes).
-    
-  { ins. desc. lia. }
-  split.
-  { cut (NOmega.le (NOnum (count_upto (fpga_write' ∩₁ in_chan chan) bound)) (NOnum n_writes)).
-    { ins. }
-    rewrite Heqlen_writes. unfold count_upto. apply count_le_filter.
-    simpl. destruct (trace_length tr); vauto.
-    subst bound. apply Nat.max_lub_iff. simpl in *. split; lia. }
-  unfold gt. apply Nat.lt_le_trans with (m := count_upto (is_fpga_prop ∩₁ in_chan chan) (extra_prop_pos + 1)).
-  { rewrite COUNT_PROPS.
-    rewrite Nat.add_1_r, count_upto_next.
-    rewrite check1; [lia| ].
-    unfold trace_labels. rewrite <- MATCH_PROP.
-    forward eapply (trace_nth_in (trace_filter (is_fpga_prop ∩₁ in_chan chan) tr) n_writes) with (d := def_lbl) as IN_FILTER. 
-    { rewrite <- Heqlen_props. vauto. }
-    vauto. 
-    apply trace_in_filter in IN_FILTER. by desc. }
-  apply count_upto_more. subst bound. apply Nat.le_max_l. }
-exfalso. 
-destruct len_props as [|n_props]; auto.
-
-forward eapply (trace_nth_filter (fpga_write' ∩₁ in_chan chan) tr n_props def_lbl) as [extra_write_pos [DOM_EW [MATCH_WRITE COUNT_WRITES]]].
-{ vauto. }
-fold (count_upto (fpga_write' ∩₁ in_chan chan) extra_write_pos) in COUNT_WRITES.
-destruct tr.
-2: admit.
-Admitted.
-(* simpl in *.
-assert (LTS_final TSOFPGA_lts (states (length l))).
-{ simpl. }
-assert (forall i (GE: i >= (extra_write_pos + 1)), (length (filter is_store_ups (up_bufs (states i) chan)) > 0)).
-
-
-
-set (enabled_memwrite st := exists st' loc val meta, TSOFPGA_step st (FpgaMemFlush chan loc val meta) st').
-assert (forall i (GE: i >= (extra_write_pos + 1))
-          (LE: NOmega.le (NOnum i) (trace_length tr)),
-            enabled_memwrite (states i)) as ENABLED_AFTER_WRITES.
-{ intros. pose proof (buffer_size_upstream_write chan i) as BUF_SIZE. specialize_full BUF_SIZE.
-  { destruct tr; vauto. }
-  cut (length (filter is_store_ups (up_bufs (states i) chan)) > 0).
-  { ins. destruct (states i) as [wp rp ups downs mem bufs]. simpl in *. red.
-    destruct (ups chan) as [| (ups_entry, meta) buf'] eqn:BUFS; [simpl in H0; lia| ].
-    exists (mkState wp rp ups downs (upd mem loc val) (upd bufs thread buf')). by eapply cpu_propagate. }
-  simpl in BUF_SIZE. cut (count_upto (cpu_write' ∩₁ in_cpu_thread thread) i > count_upto (is_cpu_prop ∩₁ in_cpu_thread thread) i); [ins; lia| ].
-  unfold gt.
-  apply Nat.le_lt_trans with (m := n_props).
-  { forward eapply (count_le_filter tr (is_cpu_prop ∩₁ in_cpu_thread thread) i def_lbl) as COUNT_LE_FILTER; auto.
-    rewrite <- Heqlen_props in COUNT_LE_FILTER. simpl in COUNT_LE_FILTER.
-    by unfold count_upto. }
-  apply Nat.lt_le_trans with (m := count_upto (cpu_write' ∩₁ in_cpu_thread thread) (extra_write_pos + 1)).
-  2: { apply count_upto_more. lia. }
-  rewrite Nat.add_1_r, count_upto_next. rewrite <- COUNT_WRITES.
-  rewrite check1; [lia| ].
-  unfold trace_labels. rewrite <- MATCH_WRITE.
-  remember (cpu_write' ∩₁ in_cpu_thread thread) as F.
-  remember (trace_nth n_props (trace_filter F tr) def_lbl) as elem. 
-  forward eapply (proj1 (trace_in_filter elem F tr)); [| intuition]. 
-  subst elem. apply trace_nth_in. vauto. }  
-
-forward eapply (filter_ends tr (is_cpu_prop ∩₁ in_cpu_thread thread) def_lbl) as [props_end [DOM NOMORE_PROPS]]. 
-{ by rewrite <- Heqlen_props. }
-set (after_last_prop := max (extra_write_pos + 1) props_end).
-
-
-assert (NOmega.le (NOnum after_last_prop) (trace_length tr)) as ALP_LE. 
-{ destruct tr; vauto. simpl in *. unfold after_last_prop. apply NPeano.Nat.max_lub_iff. split; lia. }
-
-pose proof TSO_FAIR as FAIR_. 
-specialize (@FAIR_ after_last_prop thread). specialize_full FAIR_; auto. 
-{ apply ENABLED_AFTER_WRITES; auto. 
-  pose proof (Nat.le_max_l (extra_write_pos + 1) props_end). lia. }
-
-destruct FAIR_ as (j & ALPj & DOMj & TRj). 
-specialize (NOMORE_PROPS j). specialize_full NOMORE_PROPS.
-{ pose proof (Nat.le_max_r (extra_write_pos + 1) props_end). lia. }
-{ apply lt_nondefault. unfold trace_labels. by rewrite TRj. }
-rewrite TRj in NOMORE_PROPS. unfolder'. intuition.  *)
-
-Lemma EXACT_CHAN_READS chan:
-  trace_length (trace_filter (fpga_read_resp' ∩₁ in_chan chan) tr) =
-  trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
-Proof.
-  Admitted.
-
-
-Lemma EXACT_CHAN_MEMREADS chan:
-  trace_length (trace_filter (fpga_read_ups' ∩₁ in_chan chan) tr) =
-  trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
-Proof.
-  Admitted.
-
 Lemma EXACT_CHAN_ANY_PROPS chan:
   trace_length (trace_filter (fpga_up_prop ∩₁ in_chan chan) tr) =
   trace_length (trace_filter (fpga_any_mem_prop ∩₁ in_chan chan) tr).
 Proof.
-  forward eapply (EXACT_CHAN_PROPS chan) as EXACT_CHAN_PROPS.
+  (* forward eapply (EXACT_CHAN_PROPS chan) as EXACT_CHAN_PROPS.
   forward eapply (EXACT_CHAN_MEMREADS chan) as EXACT_CHAN_MEMREADS.
   unfold fpga_up_prop, fpga_any_mem_prop.
   replace ((fpga_read_ups' ∪₁ fpga_write') ∩₁ in_chan chan) with
@@ -1013,7 +904,7 @@ Proof.
     f_equal.
     desf.
     lia. }
-  destruct (trace_filter (fpga_mem_read' ∩₁ in_chan chan) (trace_inf fl)).
+  destruct (trace_filter (fpga_mem_read' ∩₁ in_chan chan) (trace_inf fl)). *)
   Admitted.
 
 

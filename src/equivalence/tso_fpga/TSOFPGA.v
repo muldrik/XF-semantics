@@ -416,15 +416,17 @@ Definition readpool_fair tr st :=
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = FpgaReadToUpstream chan loc meta.
 
-(* Doesn't work right now because the system is not fair
-Definition enabled_writepool_write st chan loc val meta event_ind := exists st', TSOFPGA_step st (EventLab (FpgaEvent (Fpga_write_resp chan loc val) event_ind meta)) st'.
-Definition writepool_write_fair tr st :=
-  forall i chan loc val meta event_ind0
-    (DOM_EXT: NOmega.lt_nat_l i (trace_length tr)) (* le accounts for the final state if any*)
-    (ENABLED: enabled_writepool_write (st i) chan loc val meta event_ind0),
-  exists j event_ind, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
-       trace_nth j tr def_lbl = (EventLab (FpgaEvent (Fpga_write_resp chan loc val) event_ind meta)). *)
+Definition mem_flush_fair_alt tr := forall chan,
+  trace_length (trace_filter (fpga_write' ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (is_fpga_prop ∩₁ in_chan chan) tr).
 
+Definition downstream_fair_alt tr := forall chan,
+  trace_length (trace_filter (fpga_read_resp' ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
+
+Definition mem_read_fair_alt tr := forall chan,
+  trace_length (trace_filter (fpga_read_ups' ∩₁ in_chan chan) tr) =
+  trace_length (trace_filter (fpga_mem_read' ∩₁ in_chan chan) tr).
 
 Definition enabled_mem_flush st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemFlush chan loc val meta) st'.
 Definition mem_flush_fair tr st :=
