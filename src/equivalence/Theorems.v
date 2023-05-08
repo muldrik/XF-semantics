@@ -1,6 +1,6 @@
-Require Import SyEvents.
-Require Import SyExecution.
-Require Import SyLabels.
+Require Import Events.
+Require Import Execution.
+Require Import Labels.
 Require Import TSOFPGA.
 Require Import Lia.
 Require Import Arith.
@@ -11,7 +11,7 @@ Require Import AuxProp.
 Require Import AuxRel.
 From hahn Require Import Hahn.
 
-Section SyLemmas.
+Section Theorems.
 
 Variable tr: trace SyLabel.
 Variable states: nat -> SyState. 
@@ -1750,7 +1750,7 @@ Qed.
     
 Definition G :=
   {| acts := EG;
-     co := ⦗EG ∩₁ is_w⦘ ⨾ restr_eq_rel SyEvents.loc vis_lt' ⨾ ⦗EG ∩₁ is_w⦘;     
+     co := ⦗EG ∩₁ is_w⦘ ⨾ restr_eq_rel Events.loc vis_lt' ⨾ ⦗EG ∩₁ is_w⦘;     
      rf := ⦗EG ∩₁ is_w⦘ ⨾ rf' ⨾ ⦗EG ∩₁ is_r⦘;
      readpair := ⦗EG ∩₁ is_rd_req⦘ ⨾ req_resp_pair ⨾ ⦗EG ∩₁ is_rd_resp⦘;
      writepair := ⦗EG ∩₁ is_wr_req⦘ ⨾ req_resp_pair ⨾ ⦗EG ∩₁ is_wr_resp⦘;
@@ -4700,7 +4700,7 @@ Proof.
   { pose proof (TSi ind_prev DOM_prev def_lbl) as TSi. simpl in TSi.
     red in LATEST_OF. desc. red in LATEST_OF. desc.
     rewrite <- W_IND, trace_index_simpl in TSi; auto.    
-    assert (w = ThreadEvent thread (index w) (Cpu_store l (SyEvents.valw w))) as W.
+    assert (w = ThreadEvent thread (index w) (Cpu_store l (Events.valw w))) as W.
     { destruct w.
       3: { by destruct (proj1 Eninit_non_init (InitEvent x)). }
       { simpl.
@@ -4841,11 +4841,11 @@ Proof.
       { ins.            
         inversion TSi; vauto.
         { rewrite <- Heqst in H1. inversion H1. subst.
-          unfold SyEvents.loc in BUF_FLT. simpl in BUF_FLT.        
+          unfold Events.loc in BUF_FLT. simpl in BUF_FLT.        
           inversion CPU_BUF; vauto. simpl in LATEST_BUF.  
           by rewrite BUF_FLT in LATEST_BUF. }
         { rewrite <- Heqst in H1. inversion H1. subst.
-          unfold SyEvents.loc in H. simpl in H.
+          unfold Events.loc in H. simpl in H.
           by unfold valr. } }
       
       forward eapply (@latest_mem_value_kept (trace_index r) w (loc r)); vauto.
@@ -4869,14 +4869,14 @@ Proof.
     
     inversion TSi; vauto.
     { rewrite <- Heqst in H0. inversion H0. subst.
-      unfold valr, valr, SyEvents.loc in *. simpl in *. 
+      unfold valr, valr, Events.loc in *. simpl in *. 
       cut (val = valw w).
       { ins. }
       desc. 
       eapply (@latest_buf_value_read thread w (ThreadEvent thread index (Cpu_load loc val)) val); eauto.
       simpl. rewrite <- Heqst. vauto. }
     { rewrite <- Heqst in H0. inversion H0. subst.
-      unfold SyEvents.loc in BUF_FLT. simpl in BUF_FLT. 
+      unfold Events.loc in BUF_FLT. simpl in BUF_FLT. 
       inversion CPU_BUF; vauto. by rewrite BUF_FLT in EMPTY_BUF. } }
 
     assert (is_rd_resp r) as FPGA_RD by (destruct r; desf).
@@ -4910,7 +4910,7 @@ Proof.
         all: try by (unfold fpga_mem_read' in MEM_READ; desf).
         fold (trace_labels x) in H7.
         rewrite <- H7 in *.
-        unfolder'; unfold SyEvents.loc, val_l, loc_l, meta_l in *.
+        unfolder'; unfold Events.loc, val_l, loc_l, meta_l in *.
         desf.
       } 
       
@@ -6767,7 +6767,7 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { destruct POCH; unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf. }
   
   assert (Eninit x1). { destruct EG1; unfolder'; desf. }
-  forward eapply (SyLemmas.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
+  forward eapply (Theorems.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence.
   all: try by (rewrite trace_index_simpl in H7; desf).
@@ -6777,7 +6777,7 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { destruct POCH. red in PAIR2; unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf; desc; auto. }
 
   assert (Eninit x2). { destruct EG2; unfolder'; desf. }
-  forward eapply (SyLemmas.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
+  forward eapply (Theorems.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_write.
   all: try by (rewrite trace_index_simpl in H11; desf).
@@ -6789,7 +6789,7 @@ Lemma fence_one_response': irreflexive (poch G ⨾ fenceonepair G ⨾ sb G ⨾ (
   2: { red in PAIR2; unfolder'; desf. }
 
 
-  forward eapply (SyLemmas.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
+  forward eapply (Theorems.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence_req.
   all: try by (rewrite trace_index_simpl in H14; desf).
@@ -7088,7 +7088,7 @@ Lemma fence_all_response': irreflexive (sb G ⨾ fenceallpair G ⨾ sb G ⨾ (wr
   2: { unfold same_ch, chan_opt, fpga_chan_opt in *; unfolder'; desf. }
   
   assert (Eninit x1). { destruct EG1; unfolder'; desf. }
-  forward eapply (SyLemmas.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
+  forward eapply (Theorems.TSi (trace_index x1)) with (d := def_lbl) as TSi_fence.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence.
   all: try by (rewrite trace_index_simpl in H7; desf).
@@ -7096,7 +7096,7 @@ Lemma fence_all_response': irreflexive (sb G ⨾ fenceallpair G ⨾ sb G ⨾ (wr
   simpl in *.
 
   assert (Eninit x2). { destruct EG2; unfolder'; desf. }
-  forward eapply (SyLemmas.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
+  forward eapply (Theorems.TSi (trace_index x2)) with (d := def_lbl) as TSi_write.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_write.
   all: try by (rewrite trace_index_simpl in H11; desf).
@@ -7108,7 +7108,7 @@ Lemma fence_all_response': irreflexive (sb G ⨾ fenceallpair G ⨾ sb G ⨾ (wr
   2: { red in PAIR2; unfolder'; desf. }
 
 
-  forward eapply (SyLemmas.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
+  forward eapply (Theorems.TSi (trace_index x0)) with (d := def_lbl) as TSi_fence_req.
   { apply Eninit_in_trace; vauto. }
   inversion TSi_fence_req.
   all: try by (rewrite trace_index_simpl in H14; desf).
@@ -7979,8 +7979,8 @@ Proof.
   rewrite <- Heqst_r in RFw'r0.
   ex_des.
   desc. rewrite <- H2 in RFw'r0.
-  assert (SyEvents.loc r = loc) as LOC.
-  { replace loc with (SyEvents.loc w); [| vauto].
+  assert (Events.loc r = loc) as LOC.
+  { replace loc with (Events.loc w); [| vauto].
     apply (wf_frl WFG) in FRrw_. vauto. }
   rewrite LOC in RFw'r0. 
 
@@ -7990,7 +7990,7 @@ Proof.
   { splits; vauto. }
   red in RFw'r2. des.
   { subst w'. by apply (co_irr WFG w). }
-  forward eapply (SyExecution.same_thread WFG w' w) as SBW; try (by vauto).
+  forward eapply (Execution.same_thread WFG w' w) as SBW; try (by vauto).
   { red. ins. by apply (proj1 Eninit_non_init w'). }
   { unfold tid, exact_tid in *; desf. }
   des.
@@ -8163,7 +8163,7 @@ Qed.
 
 Lemma TSOFPGA_op_implies_decl:
   (fun e => trace_elems tr (EventLab e)) ≡₁ acts G \₁ is_init /\ 
-  Wf_fpga G /\ Wf G /\
+  Wf_fpga G /\ Wf G /\ rf_complete G /\
   Ax86Consistent G.
 Proof.
   splits.
@@ -8173,6 +8173,10 @@ Proof.
     symmetry. apply empty_inter_minus_same. rewrite set_interC. apply Eninit_non_init. }
   { apply WFG_fpga. }
   { apply WFG. }
+  { red. simpl. unfold set_inter at 1. red. ins. desc.  
+    forward eapply read_source as [w W]; eauto.
+    red in W. desc. simpl in W. apply seq_eqv_lr in W. desc. 
+    red. exists w. apply seq_eqv_lr. splits; vauto. }
   split.
   { apply SCPL. }
   { apply propagation'. }
@@ -8188,4 +8192,4 @@ Qed.
 
 Print Assumptions TSOFPGA_op_implies_decl.
 
-End SyLemmas.
+End Theorems.

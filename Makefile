@@ -1,5 +1,5 @@
 COQMODULE    := relive
-COQTHEORIES  := src/lib/*.v src/basic/*.v src/equivalence/*/*.v src/equivalence/*.v  src/termination/*.v src/robustness/*.v
+COQTHEORIES  := src/lib/*.v src/basic/*.v src/equivalence/*.v 
 
 .PHONY: all theories clean tounicode
 

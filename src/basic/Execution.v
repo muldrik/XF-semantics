@@ -1,20 +1,87 @@
-(******************************************************************************)
-(** * Definition of executions (common basis for all types of executions) *)
-(******************************************************************************)
-
+Require Import Labels.
+Require Import Events.
 From hahn Require Import Hahn.
-Require Import AuxRel.
-Require Import Labels Events.
 Require Import Lia.
-Require Import Arith.
 
 Set Implicit Arguments.
 
-(** Definition of an execution *)
+Section Execution.
+
+
+(* Notation "'WrReq'" := (fun a => is_true (is_wr_req a)).
+Notation "'WrRsp'" := (fun a => is_true (is_wr_resp a)).
+Notation "'RdReq'" := (fun a => is_true (is_rd_req a)).
+Notation "'RdRsp'" := (fun a => is_true (is_rd_resp a)).
+Notation "'FnReqOne'" := (fun a => is_true (is_fence_req_one a)).
+Notation "'FnRspOne'" := (fun a => is_true (is_fence_resp_one a)).
+Notation "'FnReqAll'" := (fun a => is_true (is_fence_req_all a)).
+Notation "'FnRspAll'" := (fun a => is_true (is_fence_resp_all a)).
+Notation "'CpuWrite'" := (fun a => is_true (is_cpu_wr a)).
+Notation "'CpuRead'" := (fun a => is_true (is_cpu_rd a)).
+Notation "'CpuFence'" := (fun a => is_true (is_cpu_fence a)). *)
+
+Notation "'WrReq'" := is_wr_req.
+Notation "'WrRsp'" := is_wr_resp.
+Notation "'RdReq'" := is_rd_req.
+Notation "'RdRsp'" := is_rd_resp.
+Notation "'FnReqOne'" := is_fence_req_one.
+Notation "'FnRspOne'" := is_fence_resp_one.
+Notation "'FnReqAll'" := is_fence_req_all.
+Notation "'FnRspAll'" := is_fence_resp_all.
+Notation "'CpuWrite'" := is_cpu_wr.
+Notation "'CpuRead'" := is_cpu_rd.
+Notation "'CpuFence'" := is_cpu_fence.
+
+
+(* Notation "'W'" := (CpuWrite ∪₁ WrRsp). 
+Notation "'R'" := (CpuRead ∪₁ RdRsp).
+Notation "'Req'" := (WrReq ∪₁ RdReq ∪₁ FnReqOne ∪₁ FnReqAll).
+Notation "'Rsp'" := (WrRsp ∪₁ RdRsp ∪₁ FnRspOne ∪₁ FnRspAll).
+Notation "'Cpu'" := (CpuWrite ∪₁ CpuRead ∪₁ CpuFence).
+Notation "'Fpga'" := (Req ∪₁ Rsp). *)
+
+(* Notation "'W'" := (fun a => (is_cpu_wr a \/ is_wr_resp a)). 
+Notation "'R'" := (fun a => (is_cpu_rd a \/ is_rd_resp a)).
+Notation "'Req'" := (fun a => (is_wr_req a \/ is_rd_req a \/ is_fence_req_one a \/ is_fence_req_all a)).
+Notation "'Rsp'" := (fun a => (is_wr_resp a \/ is_rd_resp a \/ is_fence_resp_one a \/ is_fence_resp_all a)). *)
+
+
+
+(* Definition W := CpuWrite ∪₁ WrRsp.
+Definition R := CpuRead ∪₁ RdRsp.
+Definition Req := WrReq ∪₁ RdReq ∪₁ FnReqOne ∪₁ FnReqAll.
+Definition Rsp := WrRsp ∪₁ RdRsp ∪₁ FnRspOne ∪₁ FnRspAll.
+Definition Cpu := CpuWrite ∪₁ CpuRead ∪₁ CpuFence.
+Definition Fpga := Req ∪₁ Rsp. *)
+
+(* Definition W := is_w.
+Definition R := is_r.
+Definition Req := is_req.
+Definition Rsp := is_resp.
+Definition Cpu := is_cpu.
+Definition Fpga := is_fpga. *)
+
+Notation "'W'" := is_w.
+Notation "'R'" := is_r.
+Notation "'Req'" := is_req.
+Notation "'Rsp'" := is_resp.
+Notation "'Cpu'" := is_cpu.
+Notation "'Fpga'" := is_fpga.
+
+
+Definition same_ch := fun a b => chan_opt a = chan_opt b /\ chan_opt a <> None.
+Definition same_loc := fun a b => loc a = loc b.
+Definition same_meta := fun a b => meta a = meta b.
+
+
 Record execution :=
   { acts : Event -> Prop ;
     rf : Event -> Event -> Prop ;
-    co : Event -> Event -> Prop ;
+    co : Event -> Event -> Prop ; (* QQ: Что это? *)
+    readpair : Event -> Event -> Prop ;
+    writepair: relation Event ;
+    fenceonepair: relation Event;
+    fenceallpair: relation Event;
   }.
 
 Ltac show_dom :=
@@ -38,19 +105,72 @@ Ltac show_dom :=
            rewrite <- X; clear X
          end; try done.
 
-Section Execution.
 
 Variable G : execution.
 
 Notation "'E'" := G.(acts).
 Notation "'rf'" := G.(rf).
-Notation "'co'" := G.(co).
+Notation "'co'" := G.(co). (* PR: mo *)
+Notation "'readpair'" := G.(readpair).
+Notation "'writepair'" := G.(writepair).
+Notation "'fenceonepair'" := G.(fenceonepair).
+Notation "'fenceallpair'" := G.(fenceallpair).
 
-Notation "'R'" := (fun a => is_true (is_r a)).
-Notation "'W'" := (fun a => is_true (is_w a)).
-Notation "'RMW'" := (fun a => is_true (is_rmw a)).
+Definition allpair := readpair ∪ writepair ∪ fenceonepair ∪ fenceallpair.
 
-Definition sb := ⦗E⦘ ⨾ ext_sb ⨾  ⦗E⦘.
+Definition rfe' := rf \ same_tid.
+
+(* Derived relations *)
+
+
+Definition sb := ⦗E⦘ ⨾ ext_sb ⨾ ⦗E⦘.
+
+Definition poloc := sb ∩ same_loc.
+Definition poch := sb ∩ same_ch.
+Definition fr := rf⁻¹ ⨾ co \ ⦗fun _ => True⦘.
+Definition fr' := (⦗R ∩₁ E⦘ ⨾ same_loc ⨾ ⦗W ∩₁ E⦘) \ (rf⁻¹ ⨾ (co⁻¹)^*).
+
+Definition minus_event (A B: Event -> Prop) := fun a => A a /\ ~ B a.
+Notation "'E' \ 'RdRsp'" := (minus_event E RdRsp).
+
+Definition fre' := fr \ same_tid.
+Definition rfr := ⦗fun x => ~ is_w x⦘ ⨾ rf⁻¹ ⨾ co.
+
+
+Definition rfe := rf \ sb.
+(* old defs *)
+Definition coe := co \ sb.
+Definition fre := fr \ sb.
+Definition rfi := rf ∩ sb.
+Definition coi := co ∩ sb.
+Definition fri := fr ∩ sb.
+
+(* TODO: *)
+(* Definition readpair :=  *)
+
+(* Нужен ли same_loc? *)
+(* Definition readpair a b := RdReq a /\ RdRsp b /\ same_loc a b /\ same_meta a b.
+Definition writepair a b := WrReq a /\ WrRsp b /\ same_meta a b.
+Definition fenceonepair a b := FnReqOne a /\ FnRspOne b /\ same_meta a b.
+Definition fenceallpair a b := FnReqAll a /\ FnRspAll b /\ same_meta a b.
+Definition allpair := readpair ∪ writepair ∪ fenceonepair ∪ fenceallpair. *)
+
+(* Один resp только у одного req?, аналогично rf^-1 *)
+
+Record Wf_fpga := {
+  wf_readpairE: readpair ≡ ⦗E⦘ ⨾ readpair ⨾ ⦗E⦘ ;
+  wf_readpairD: readpair ≡ ⦗RdReq⦘ ⨾ readpair ⨾ ⦗RdRsp⦘ ;
+  wf_readpair_complete: E ∩₁ RdReq ⊆₁ dom_rel readpair ;
+  wf_writepairE: writepair ≡ ⦗E⦘ ⨾ writepair ⨾ ⦗E⦘ ;
+  wf_writepairD: writepair ≡ ⦗WrReq⦘ ⨾ writepair ⨾ ⦗WrRsp⦘ ;
+  wf_writepair_complete: E ∩₁ WrReq ⊆₁ dom_rel writepair ;
+  wf_fenceonepairE: fenceonepair ≡ ⦗E⦘ ⨾ fenceonepair ⨾ ⦗E⦘ ;
+  wf_fenceonepairD: fenceonepair ≡ ⦗FnReqOne⦘ ⨾ fenceonepair ⨾ ⦗FnRspOne⦘ ;
+  wf_fenceonepair_complete: E ∩₁ FnReqOne ⊆₁ dom_rel fenceonepair ;
+  wf_fenceallpairE: fenceallpair ≡ ⦗E⦘ ⨾ fenceallpair ⨾ ⦗E⦘ ;
+  wf_fenceallpairD: fenceallpair ≡ ⦗FnReqAll⦘ ⨾ fenceallpair ⨾ ⦗FnRspAll⦘ ;
+  wf_fenceallpair_complete: E ∩₁ FnReqAll ⊆₁ dom_rel fenceallpair ;
+}.
 
 Record Wf :=
   { wf_index : forall a b,
@@ -59,6 +179,7 @@ Record Wf :=
     wf_rfD : rf ≡ ⦗W⦘ ⨾ rf ⨾ ⦗R⦘ ;
     wf_rfl : rf ⊆ same_loc ;
     wf_rfv : forall w r (RF: rf w r), valw w = valr r ;
+    (* wf_rf_complete : E ∩₁ R ⊆₁ codom_rel rf ; *)
     wf_rff : functional rf⁻¹ ;
     wf_coE : co ≡ ⦗E⦘ ⨾ co ⨾ ⦗E⦘ ;
     wf_coD : co ≡ ⦗W⦘ ⨾ co ⨾ ⦗W⦘ ;
@@ -68,47 +189,64 @@ Record Wf :=
     co_irr : irreflexive co ;
     wf_initE : is_init ⊆₁ E ;
     wf_co_init : co ⨾ ⦗is_init⦘ ≡ ∅₂ ;
-    wf_tid_init : forall e (ACT : acts G e), tid e = 0 <-> is_init e ;
   }.
 
-Implicit Type WF : Wf.
 
-(******************************************************************************)
-(** ** Derived relations  *)
-(******************************************************************************)
+Definition fenceCpu := sb ⨾ ⦗CpuFence⦘ ⨾ sb.
+Definition poFnRsp := (poch ⨾ ⦗FnRspOne⦘) ∪ (sb ⨾ ⦗FnRspAll⦘).
+Definition fenceFpga := ⦗WrRsp⦘ ⨾ poFnRsp ⨾ sb ⨾ ⦗E \ RdRsp⦘.
+Definition fence := fenceCpu ∪ fenceFpga.
 
-(* reads-before, aka from-read *)
-Definition fr := rf⁻¹ ⨾ co \ ⦗fun _ => True⦘.
+Definition ppoCpu := (sb \ (W × R)) ∩ (Cpu × Cpu).
+Definition ppoFpga := (⦗Rsp⦘ ⨾ poch ⨾ ⦗E \ RdRsp⦘) ∪ (⦗RdRsp⦘ ⨾ sb ⨾ ⦗E \ RdRsp⦘) ∪ allpair.
+Definition ppo := ppoCpu ∪ ppoFpga.
 
-Definition rfr := ⦗fun x => ~ is_w x⦘ ⨾ rf⁻¹ ⨾ co.
+(* add sb asyclic? *)
+Record Ax86Consistent := {
+    sc_per_loc: acyclic ((poloc ∪ rf ∪ co ∪ fr) ∩ (Cpu × Cpu));
+    propagation: acyclic (ppo ∪ fence ∪ rfe ∪ fre ∪ co);
+    read_after_write: irreflexive (fr ⨾ poch ⨾ readpair);
+    read_after_fence: irreflexive (fr ⨾ poFnRsp ⨾ sb ⨾ readpair);
+    no_read_from_future: irreflexive (rf ⨾ sb);
+    observe_same_channel: irreflexive (fre ⨾ rfe ⨾ poch);
+    fence_all_response: irreflexive (sb ⨾ fenceallpair ⨾ sb ⨾ writepair⁻¹);
+    fence_one_response: irreflexive (poch ⨾ fenceonepair ⨾ sb ⨾ writepair⁻¹);
+    fence_all_block: irreflexive (sb ⨾ writepair ⨾ sb ⨾ fenceallpair⁻¹);
+    fence_one_block: irreflexive (poch ⨾ writepair ⨾ sb ⨾ fenceonepair⁻¹);
+}.
 
-(* happens-before *)
-Definition hb := (sb ∪ rf)⁺.
-
-(* happens-before-sc *)
-Definition hb_sc := (sb ∪ rf ∪ co ∪ fr)⁺.
-
-(* extended coherence order *)
-Definition eco := co ⨾ rf^? ∪ fr ⨾ rf^? ∪ rf.
-
-
-(******************************************************************************)
-(** ** Basic axioms *)
-(******************************************************************************)
-
-Definition bounded_threads := exists n, forall x, E x -> tid x < n.
-
+Definition bounded_threads := exists n, forall x, E x -> match tid x with 
+  | CpuTid t => t < n
+  | _ => True
+  end.
+  
 Definition rf_complete := E ∩₁ R  ⊆₁ codom_rel rf.
-
 Definition mem_fair := fsupp co /\ fsupp fr.
 
-Definition rmw_atomicity := rf ⨾ ⦗W⦘ ⊆ co \ (co ⨾ co).
+Definition LTS_trace_param {Label State}
+           (lts : LTS State Label)
+           (s : nat -> State) (t : trace Label)  :=
+  match t with
+  | trace_fin l =>
+    LTS_init lts (s 0) /\
+    forall i (LLEN : i < length l) d,
+      LTS_step lts (s i) (nth i l d) (s (S i))
+  | trace_inf fl =>
+    LTS_init lts (s 0) /\
+    forall i, LTS_step lts (s i) (fl i) (s (S i))
+  end.
 
-Definition SCpL := acyclic (restr_eq_rel Events.loc sb ∪ rf ∪ co ∪ fr).
+Lemma LTS_trace_param' {State Label: Type} (lts: LTS State Label)
+      st tr (LTS: LTS_trace_param lts st tr):
+  LTS_init lts (st 0) /\
+  (forall i,
+      NOmega.lt_nat_l i (trace_length tr) ->
+      forall d, LTS_step lts (st i) (trace_nth i tr d) (st (S i))).
+Proof.
+  destruct tr; simpl; vauto. red in LTS. desc. split; vauto.
+Qed. 
 
-(******************************************************************************)
-(** ** Basic transitivity properties *)
-(******************************************************************************)
+
 
 Lemma sb_trans : transitive sb.
 Proof using.
@@ -125,6 +263,10 @@ Lemma sb_same_loc_trans: transitive (sb ∩ same_loc).
 Proof using.
   apply restr_eq_trans, sb_trans.
 Qed.
+
+Definition hb := (sb ∪ rf)⁺.
+Definition hb_sc := (sb ∪ rf ∪ co ∪ fr)⁺.
+Definition eco := co ⨾ rf^? ∪ fr ⨾ rf^? ∪ rf.
 
 Lemma hb_trans : transitive hb.
 Proof using.
@@ -150,6 +292,8 @@ Proof using. basic_solver. Qed.
 (** ** Same Location relations  *)
 (******************************************************************************)
 
+Implicit Type WF : Wf.
+
 Lemma loceq_rf WF : funeq loc rf.
 Proof using. apply WF. Qed.
 
@@ -160,7 +304,7 @@ Hint Immediate loceq_rf loceq_co : core.
 
 Lemma loceq_fr WF : funeq loc fr.
 Proof using.
-  eauto with hahn.
+ eauto with hahn.
 Qed.
 
 Lemma loceq_rfr WF : funeq loc rfr.
@@ -168,13 +312,94 @@ Proof using.
   eauto with hahn.
 Qed.
 
+Lemma fr_fr' WF (C: rf_complete) : fr ≡ fr'.
+Proof.
+  split.
+  { red; ins.
+    unfold fr, fr' in *.
+    destruct H.
+    repeat destruct H.
+    red; splits.
+    { red in H.
+      apply seq_eqv_lr.
+      remember (loceq_rf WF x0 x H).
+      remember (loceq_co WF x0 y H1).
+      clear Heqe Heqe0.
+      destruct WF.
+      remember H as H'; clear HeqH'.
+      apply wf_rfE0 in H.
+      apply wf_rfD0 in H'.
+      remember H1 as H1'; clear HeqH1'.
+      apply wf_coE0 in H1.
+      apply wf_coD0 in H1'.
+      apply seq_eqv_lr in H, H1, H', H1'.
+      splits; desf.
+      red; lia. }
+    red; ins.
+    repeat destruct H2.
+    red in H, H2.
+    replace x1 with x0 in *.
+    2: { fold (rf⁻¹ x x0) in H.
+        fold (rf⁻¹ x x1) in H2.
+        exact (wf_rff WF x x0 x1 H H2). }
+    assert ((co⁻¹) x0 y).
+    { destruct WF. 
+      apply rt_of_trans in H3; vauto.
+      2: { apply transitive_transp; basic_solver. }
+      destruct H3.
+      { subst. basic_solver. }
+      auto. }
+    red in H4.
+    assert (antisymmetric co) by (apply trans_irr_antisymmetric; destruct WF; basic_solver).
+    red in H5.
+    remember (H5 x0 y H1 H4).
+    destruct WF.
+    subst.
+    basic_solver. } 
+  red; ins.
+  red; red in H.
+  red; destruct H.
+  splits.
+  2: { intro; red in H1; desf; subst; apply seq_eqv_lr in H. desf. red in H, H3; desf. red in H, H3; desf. }
+  apply seq_eqv_lr in H.
+  red in H0.
+  destruct WF.
+  assert (exists w, rf w x).
+  { apply C. red; desf. cbv in *; desf. }
+  desf.
+  cut (co w y \/ (co⁻¹)＊ w y).
+  2: { red in H2.
+       cut (w = y \/ w <> y); [|by tauto].
+       intro OR; destruct OR; [right; subst; apply rt_refl|].
+       remember (wf_co_total0 (loc y)) as COT.
+       forward eapply (COT w _ y _); auto.
+       Unshelve.
+       2: { assert (rf w x) as H1'; auto.
+            apply wf_rfD0 in H1.
+            apply wf_rfE0 in H1'.
+            apply seq_eqv_lr in H1, H1'.
+            split; desf.
+            rewrite <- H2.
+            destruct (wf_rfl0 w x H5); auto.
+        }
+       2: { destruct H3; split; desf. }
+       ins; desf; auto.
+       right.
+       apply rt_step.
+       auto.
+   }
+  ins.
+  destruct H4.
+  { red. exists w. splits; vauto. }
+  exfalso; apply H0.
+  red. exists w; splits; auto.
+Qed.
 
 Lemma wf_frl WF : fr ⊆ same_loc.
 Proof using.
-  unfold fr.
-  rewrite (wf_rfl WF), (wf_col WF).
-  unfold Events.same_loc.
-  unfolder; ins; desc; congruence.
+  red; ins.
+  remember (loceq_fr WF H).
+  unfold same_loc. exact e.
 Qed.
 
 Lemma wf_rfrl WF : rfr ⊆ same_loc.
@@ -236,7 +461,7 @@ Lemma wf_frD WF : fr ≡ ⦗R⦘ ⨾ fr ⨾ ⦗W⦘.
 Proof using.
   apply dom_helper_2; unfold fr.
   rewrite wf_rfD, wf_coD; ins.
-  unfolder; ins; desf.
+  unfolder; ins; desf; intuition.
 Qed.
 
 Lemma wf_rfrD WF : rfr ≡ ⦗R \₁ W⦘ ⨾ rfr ⨾ ⦗W⦘.
@@ -278,40 +503,32 @@ Proof using.
     unfold fr, rfr; unfolder; ins; desf; splits; try intro; desf; eauto.
 Qed.
 
-Lemma frE WF (C : rf_complete) (ATOM : rmw_atomicity) :
+Lemma read_not_write (x: Event):
+  R x -> ~ W x.
+Proof.
+  intros; intro.
+  unfold is_r, is_w in *; desf.
+Qed.
+
+
+Lemma frE WF (C : rf_complete):
   fr ≡ rfr ∪ ⦗R⦘ ⨾ co.
 Proof using.
   rewrite wf_frE, wf_rfrE, wf_coE, wf_frD, wf_rfrD, wf_coD; ins.
-  red in ATOM.
   unfold fr, rfr; unfolder; split; ins; desf; clarify_not.
   {
     classical_left; clarify_not; eauto 10.
-    cut (~ is_w x); eauto 10.
-    intro; eapply (wf_co_total WF) with (x := loc x) in H3; desf; ins.
-      by destruct (ATOM z x) as [_ X]; unfolder; ins; apply X; vauto.
-    unfolder; splits; ins.
-    apply wf_rfl in H0; ins; apply wf_col in H4; ins; congruence.
+    cut (~ is_w x). eauto 20.
+    intro.
+    fold W in H7.
+    eapply read_not_write; eauto.
   }
   splits; ins; eauto; try intro; desf.
-  splits; ins; try intro; desf; eauto using (co_irr WF).
-  destruct (C x) as [z RF]; ins.
-  tertium_non_datur (z = y) as [|NEQ]; desf.
-  {
-    destruct (ATOM y x) as [X _]; vauto.
-    exfalso; eapply co_irr, co_trans; eauto.
-  }
-  eapply wf_co_total in NEQ; ins; desf; eauto using (co_trans WF).
-  { destruct (ATOM z x) as [X _]; vauto.
-    exfalso; eapply co_irr, co_trans, co_trans; eauto.
-  }
-  hahn_rewrite (wf_rfE WF) in RF.
-  hahn_rewrite (wf_rfD WF) in RF.
-  hahn_rewrite (wf_rfl WF) in RF.
-  hahn_rewrite (wf_col WF) in H0.
-  unfolder in *; desf; splits; ins; congruence.
+  exfalso.
+  by eapply read_not_write; eauto.
 Qed.
 
-Lemma w_fr_in_co WF (C : rf_complete) (ATOM : rmw_atomicity) :
+Lemma w_fr_in_co WF (C : rf_complete) :
   ⦗is_w⦘ ⨾ fr ⊆ co.
 Proof using. rewrite frE; auto. rewrite (wf_rfrD WF). basic_solver. Qed.
 
@@ -333,7 +550,7 @@ Qed.
 (** ** init *)
 (******************************************************************************)
 
-Lemma init_w WF: is_init ⊆₁ W \₁ RMW.
+Lemma init_w WF: is_init ⊆₁ W.
 Proof using.
   unfolder; ins.
   unfold is_init in *; destruct x; desf.
@@ -342,8 +559,8 @@ Qed.
 Lemma read_or_rmw_not_init WF a (A: R a) : ~ is_init a.
 Proof using.
   intro.
-  assert ((W \₁ RMW) a) by (apply init_w; basic_solver).
-  unfolder in *; type_solver 20.
+  assert (W a) by (apply init_w; basic_solver).
+  by eapply read_not_write; eauto.
 Qed.
 
 Lemma no_sb_to_init : sb ≡ sb ⨾  ⦗fun x => ~ is_init x⦘.
@@ -376,6 +593,7 @@ Lemma init_same_loc a b
   a = b.
 Proof using.
   destruct a, b; desf.
+  unfold loc in LOC.
     by cut (x = x0); [ins; subst|simpls].
 Qed.
 
@@ -463,6 +681,7 @@ Proof using.
   basic_solver 42.
 Qed.
 
+
 Lemma tid_sb WF: ⦗E⦘ ⨾ same_tid ⨾  ⦗E⦘ ⊆ sb^? ∪ sb⁻¹ ∪ (is_init × is_init).
 Proof using.
   unfold sb.
@@ -470,7 +689,7 @@ Proof using.
   unfolder; intuition.
   unfold same_tid, same_index in *.
   destruct x, y; ins; desf; eauto.
-  { apply (wf_tid_init WF) in H2; auto. simpls. desf. }
+  repeat left; apply WF; splits; ins.
   repeat left; apply WF; splits; ins.
 Qed.
 
@@ -492,7 +711,6 @@ Lemma same_thread WF x y (X : E x) (Y : E y)
 Proof using.
   eapply tid_ninit_sb; ins; unfolder; splits; ins.
   destruct x, y; ins; desf.
-  apply (wf_tid_init WF) in X; auto. simpls. desf.
 Qed.
 
 Lemma sb_immediate_adjacent WF:
@@ -547,13 +765,14 @@ Proof using.
   by unfold fr; rewrite <- seq_eqv_minus_lr, seqA, co_ninit.
 Qed.
 
-Lemma get_elem WF thread index :
+Lemma get_elem_cpu WF thread index :
   exists ! eo,
     match eo with
       None => forall l, ~ E (ThreadEvent thread index l)
     | Some (ThreadEvent t i l) =>
       E (ThreadEvent t i l) /\ t = thread /\ i = index
     | Some (InitEvent _) => False
+    | Some (FpgaEvent l i m) => False
     end.
 Proof using.
   ins; tertium_non_datur (exists lab, E (ThreadEvent thread index lab)) as [X|X]; desc.
@@ -563,16 +782,66 @@ Proof using.
   exists None; split; try red; ins; desf; desf; exfalso; eauto.
 Qed.
 
+Lemma get_elem_fpga WF index:
+  exists ! eo,
+    match eo with
+      None => forall l meta, ~ E (FpgaEvent l index meta)
+    | Some (ThreadEvent t i l) => False
+    | Some (InitEvent _) => False
+    | Some (FpgaEvent l i m) => 
+      E (FpgaEvent l i m) /\ i = index
+    end.
+Proof using.
+  ins; tertium_non_datur (exists lab meta, E (FpgaEvent lab index meta)) as [X|X]; desc.
+  exists (Some (FpgaEvent lab index meta)); split; ins; desf; desf;
+      [|by edestruct H; eauto].
+    now f_equal; eapply (wf_index WF); splits; ins.
+  exists None; split; try red; ins; desf; desf; exfalso; eauto.
+Qed.
+
+Lemma get_elem WF thread index :
+  exists ! eo,
+    match eo with
+      None => match thread with 
+                CpuTid t => forall l, ~ E (ThreadEvent t index l)
+              | FpgaTid => forall l meta, ~ E (FpgaEvent l index meta)
+              | InitTid => True
+              end
+    | Some (ThreadEvent t i l) =>
+      E (ThreadEvent t i l) /\ (CpuTid t) = thread /\ i = index
+    | Some (InitEvent _) => False
+    | Some (FpgaEvent l i m) => 
+      E (FpgaEvent l i m) /\ i = index /\ thread = FpgaTid
+    end.
+Proof using.
+  ins.
+  destruct thread as [t| |].
+  { remember (get_elem_cpu WF t index) as X.
+    destruct X as [X Y]. destruct Y.
+    exists X. split; ins; desf; desf; eauto. }
+  { remember (get_elem_fpga WF index) as X.
+    destruct X as [X Y]. destruct Y.
+    exists X. split; ins; desf; desf; eauto. }
+  exists None. split; ins; desf; desf; eauto.
+Qed.
+
 Lemma fsupp_sb WF : fsupp (⦗set_compl is_init⦘ ⨾ sb).
 Proof using.
   unfold sb, ext_sb; unfolder; ins.
-  destruct y; [exists nil; ins; desf|].
-  assert (X := get_elem WF thread); desc.
+  destruct y.
+  3: { exists nil; ins; desf. } 
+  { assert (X := get_elem_cpu WF thread); desc.
   eapply unique_choice in X; desc.
   exists (map_filter f (List.seq 0 index)); ins; desf; desf.
   rewrite in_map_filter; exists index0; specialize (X index0).
   rewrite in_seq0_iff; desf; desf; split; ins; [|edestruct X; edone].
-  by f_equal; eapply (wf_index WF); splits; ins.
+  by f_equal; eapply (wf_index WF); splits; ins. }
+  { assert (X := get_elem_fpga WF); desc.
+  eapply unique_choice in X; desc.
+  exists (map_filter f (List.seq 0 index)); ins; desf; desf.
+  rewrite in_map_filter; exists index0; specialize (X index0).
+  rewrite in_seq0_iff; desf; desf; split; ins; [|edestruct X; edone].
+  by f_equal; eapply (wf_index WF); splits; ins. }
 Qed.
 
 Lemma fsupp_rf WF : fsupp rf.
@@ -625,18 +894,19 @@ Proof using.
   specialize (IHl DUP); desf; eexists (_ :: _); ins; eauto.
 Qed.
 
-Lemma has_finite_antichains_sb WF (B: bounded_threads) :
+
+(* Lemma has_finite_antichains_sb WF (B: bounded_threads) :
   has_finite_antichains (E \₁ is_init) (⦗set_compl is_init⦘ ⨾ sb).
 Proof using.
-  destruct B as [n THR]; exists n; red; ins; unfolder in *.
+  (* destruct B as [n THR]; exists n; red; ins; unfolder in *.
   cut (exists a b, a <> b /\ In a l /\ In b l /\ tid a = tid b).
   { intro X; desc.
     destruct (INCL _ X0); destruct (INCL _ X1); desc.
     eapply same_thread in X2; unfolder in X2; desf.
     exists a, b; splits; eauto.
     exists b, a; splits; eauto. }
-  assert (M: incl (map tid l) (List.seq 0 n)).
-    red; ins; rewrite in_map_iff in *; desf.
+  assert (M: incl (map tid l) (cons FpgaTid (map CpuTid (List.seq 0 n)))).
+    red; ins; rewrite in_map_iff in *. desf.
     by apply in_seq0_iff, THR, INCL.
   destruct (classic (NoDup (map tid l))).
   { eapply NoDup_incl_length in M; ins.
@@ -649,20 +919,27 @@ Proof using.
   exists e0, e; splits; eauto with hahn.
   intro; desf; rewrite nodup_app, nodup_cons in *; desf; eauto with hahn.
 Qed.
+*)
 
-Hint Resolve has_finite_antichains_sb : core.
+(* Hint Resolve has_finite_antichains_sb : core. *)
 
-Lemma countable_ninit WF : countable (E \₁ is_init).
+(* Lemma countable_ninit WF : countable (E \₁ is_init).
 Proof using.
-  assert (X := unique_choice _ (fun ti => get_elem WF (nat_fst ti) (nat_snd ti)));
+  (* assert (X := unique_choice _ (fun ti => get_elem WF (nat_fst ti) (nat_snd ti)));
+    desc.
+  assert (F := unique_choice _ (fun ti => get_elem_fpga WF ti));
+    desc. *)
+  assert (X := unique_choice _ (fun ti => get_elem WF (fst ti) (snd ti)));
     desc.
   assert (default: Event) by vauto.
   apply surjection_countable with
       (f := fun n => match f n with Some e => e | None => default end).
   unfolder; ins; desf; destruct a; ins.
-  exists (nat_tup thread index); specialize (X (nat_tup thread index)); desf; desf.
+  { exists (nat_tup thread index); specialize (X (nat_tup thread index)); desf; desf.
     rewrite nat_fst_tup, nat_snd_tup in *; eapply (wf_index WF); splits; ins.
-  eby edestruct X; rewrite nat_fst_tup, nat_snd_tup.
+    eby edestruct X; rewrite nat_fst_tup, nat_snd_tup. }
+  exists index; specialize (F index); desf; desf.
+    eapply (wf_index WF); splits; ins.
 Qed.
 
 Lemma exec_exists_enum WF (FAIR: mem_fair)
@@ -683,19 +960,19 @@ Proof using.
   unfolder; split; ins.
   intro NINIT; rewrite enumeratesE in X; desc.
   eapply RNG in LTi; unfolder in LTi; desf.
-Qed.
+Qed. *) *)
 
 
 (******************************************************************************)
 (** ** external-internal restrictions *)
 (******************************************************************************)
 
-Definition rfe := rf \ sb.
-Definition coe := co \ sb.
-Definition fre := fr \ sb.
-Definition rfi := rf ∩ sb.
-Definition coi := co ∩ sb.
-Definition fri := fr ∩ sb.
+(* Definition rfe := rf \ sb. *)
+(* Definition coe := co \ sb. *)
+(* Definition fre := fr \ sb. *)
+(* Definition rfi := rf ∩ sb. *)
+(* Definition coi := co ∩ sb. *)
+(* Definition fri := fr ∩ sb. *)
 
 Lemma ri_union_re r : r ≡ r ∩ sb ∪ r \ sb.
 Proof using. unfolder; split; ins; desf; tauto. Qed.
@@ -725,17 +1002,17 @@ Proof using. show_dom. Qed.
 Lemma wf_freE WF: fre ≡ ⦗E⦘ ⨾ fre ⨾ ⦗E⦘.
 Proof using. show_dom. Qed.
 Lemma wf_rfiD WF : rfi ≡ ⦗W⦘ ⨾ rfi ⨾ ⦗R⦘.
-Proof using. split; [|basic_solver]. apply (ri_dom (wf_rfD WF)). Qed.
+Proof using. split; [|basic_solver]. apply ri_dom, (wf_rfD WF). Qed.
 Lemma wf_coiD WF : coi ≡ ⦗W⦘ ⨾ coi ⨾ ⦗W⦘.
-Proof using. split; [|basic_solver]. apply (ri_dom (wf_coD WF)). Qed.
+Proof using. split; [|basic_solver]. apply ri_dom, (wf_coD WF). Qed.
 Lemma wf_friD WF : fri ≡ ⦗R⦘ ⨾ fri ⨾ ⦗W⦘.
-Proof using. split; [|basic_solver]. apply (ri_dom (wf_frD WF)). Qed.
+Proof using. split; [|basic_solver]. apply ri_dom, (wf_frD WF). Qed.
 Lemma wf_rfeD WF : rfe ≡ ⦗W⦘ ⨾ rfe ⨾ ⦗R⦘.
-Proof using. split; [|basic_solver]. apply (re_dom (wf_rfD WF)). Qed.
+Proof using. split; [|basic_solver]. apply re_dom, (wf_rfD WF). Qed.
 Lemma wf_coeD WF : coe ≡ ⦗W⦘ ⨾ coe ⨾ ⦗W⦘.
-Proof using. split; [|basic_solver]. apply (re_dom (wf_coD WF)). Qed.
+Proof using. split; [|basic_solver]. apply re_dom, (wf_coD WF). Qed.
 Lemma wf_freD WF : fre ≡ ⦗R⦘ ⨾ fre ⨾ ⦗W⦘.
-Proof using. split; [|basic_solver]. apply (re_dom (wf_frD WF)). Qed.
+Proof using. split; [|basic_solver]. apply re_dom, (wf_frD WF). Qed.
 
 (******************************************************************************)
 (** ** properties of external/internal relations *)
@@ -773,7 +1050,7 @@ Proof using. rewrite wf_rfl; basic_solver 12. Qed.
 Lemma coi_in_sbloc WF : co ∩ sb ⊆ restr_eq_rel loc sb.
 Proof using. rewrite wf_col; basic_solver 12. Qed.
 Lemma fri_in_sbloc WF : fr ∩ sb ⊆ restr_eq_rel loc sb.
-Proof using. rewrite (funeq_same_loc (loceq_fr WF)).
+Proof using. rewrite (funeq_same_loc fr (loceq_fr WF)).
 unfolder; unfold Events.same_loc in *.
 ins; desf; splits; eauto; congruence.
 Qed.
@@ -797,7 +1074,7 @@ Tactic Notation "ie_unfolder" :=  repeat autounfold with ie_unfolderDb in *.
 (** ** Execution prefixes *)
 (******************************************************************************)
 
-Definition sub_execution G G' :=
+(* Definition sub_execution G G' :=
   ⟪SUBev: acts G ⊆₁ acts G' ⟫ /\
   ⟪SUBrf: rf G ≡ rf G' ⨾ ⦗acts G⦘ ⟫ /\
   ⟪SUBco: co G ≡ ⦗acts G⦘ ⨾ co G' ⨾ ⦗acts G⦘ ⟫ /\
@@ -824,6 +1101,7 @@ Proof using.
     rewrite wf_rfD0 at 1; clear; basic_solver. }
   { rewrite SUBrf, wf_rfl0 at 1; clear; basic_solver. }
   { apply SUBrf in RF; revert RF; basic_solver. }
+  { rewrite SUBrf. rewrite SUBev. basic_solver. }
   { rewrite SUBrf; basic_solver. }
   { rewrite SUBco; basic_solver. }
   { rewrite SUBco; rewrite wf_coD0 at 1; clear; basic_solver. }
@@ -877,13 +1155,13 @@ Proof using SE.
 Qed.
 
 
-End SubExecution.
+End SubExecution. *)
 
 (******************************************************************************)
 (** ** Execution prefix by event enumeration *)
 (******************************************************************************)
 
-Definition exec_enum G (nu : nat -> Event) n :=
+(* Definition exec_enum G (nu : nat -> Event) n :=
   let s := is_init ∪₁ (nu ↑₁ (fun x => x < n)) in
   {| acts := acts G ∩₁ s ;
      rf := ⦗s⦘ ⨾ rf G ⨾ ⦗s⦘ ;
@@ -1027,4 +1305,4 @@ Proof.
   cut (fr G y z); [basic_solver| ]. red. split.
   2: { unfolder. red. ins. desc. subst. eapply co_irr; eauto. }
   exists x. split; auto. 
-Qed. 
+Qed. *)

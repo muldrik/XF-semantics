@@ -1,6 +1,6 @@
-Require Import SyEvents.
-Require Import SyExecution.
-Require Import SyLabels.
+Require Import Events.
+Require Import Execution.
+Require Import Labels.
 Require Import TSOFPGA.
 Require Import Lia.
 Require Import Arith.

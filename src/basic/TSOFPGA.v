@@ -1,6 +1,6 @@
-Require Import SyEvents.
-Require Import SyLabels.
-Require Import SyExecution.
+Require Import Events.
+Require Import Labels.
+Require Import Execution.
 Require Import List.
 From hahn Require Import Hahn. 
 Require Import Lia.
@@ -46,10 +46,6 @@ Definition UpsBuf := list (UpstreamEntry * Mdata).
 Definition UpsBufs := Chan -> UpsBuf.
 Definition DownsBuf := list (Loc * Val * Mdata).
 Definition DownsBufs := Chan -> DownsBuf.
-(* Definition FPGAState := (WPool * RPool * UpsBufs * DownsBufs)%type.
-Definition SyState := (FPGAState * shared_memory * (Tid -> buffer))%type. *)
-
-(* conver SyState to record and unfold fpgaState *)
 
 Record SyState := mkState {
   w_pool: WPool;
@@ -258,21 +254,6 @@ Definition proj_ev (lbl: SyLabel) :=
   | _ => InitEvent 0
   end.
 
-
-(* Definition write_ts x :=
-  match x with
-  | EventLab _ i _ => S ts
-  | RA_internal _ _ _ => 0
-  end. *)
-
-(* End Experimental *)
-
-(* Definition lbl_cpu_thread_opt (lbl: SyLabel) :=
-  match lbl with
-  | EventLab (ThreadEvent thread _ _) => Some thread
-  | CpuFlush thread => Some thread
-  | _ => None
-  end. *)
 
 Definition lbl_thread (lbl: SyLabel) :=
   match lbl with
