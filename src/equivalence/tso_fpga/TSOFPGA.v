@@ -443,6 +443,14 @@ Definition memread_fair tr st :=
   exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
        trace_nth j tr def_lbl = FpgaMemRead chan loc val meta.
 
+Definition enabled_memwrite st chan loc val meta := exists st', TSOFPGA_step st (FpgaMemFlush chan loc val meta) st'.
+Definition memwrite_fair tr st :=
+  forall i chan loc val meta
+    (DOM_EXT: NOmega.le (NOnum i) (trace_length tr)) (* le accounts for the final state if any*)
+    (ENABLED: enabled_memwrite (st i) chan loc val meta),
+  exists j, i <= j /\ (NOmega.lt_nat_l j (trace_length tr)) /\
+       trace_nth j tr def_lbl = FpgaMemFlush chan loc val meta.
+
 Definition fpga_up_prop := fpga_read_ups' ∪₁ fpga_write'.
 Definition fpga_any_mem_prop := fpga_mem_read' ∪₁ is_fpga_prop.
 
