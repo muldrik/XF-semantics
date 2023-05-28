@@ -1,5 +1,5 @@
-This code contains Coq proofs supplementing the _Mechanizing the semantics of shared memory
-in Intel CPU/FPGA systems_ bachelor thesis by Nikita Mittcev.
+This code contains Coq proofs supplementing the [_Mechanizing the semantics of shared memory
+in Intel CPU/FPGA systems_](https://drive.google.com/file/d/1FYsEFJfQEGYEib3AvrabRZaYvvuwF6Ha/view?usp=drive_link) bachelor thesis by Nikita Mittcev.
 <!-- More on the artifact constructed from the code (including a VM image and installation guidelines) are stated in [ARTIFACT.md](ARTIFACT.md). -->
 
 ### Project dependencies
